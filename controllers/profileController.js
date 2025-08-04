@@ -2,6 +2,11 @@
 const { query, queryOne } = require('../config/database');
 const { saveBase64Image, deleteFile, validateBase64Image } = require('../utils/fileUpload');
 
+// Helper function to normalize name for comparison
+const normalizeName = (name) => {
+    return name ? name.trim().replace(/\s+/g, ' ').toLowerCase() : null;
+};
+
 // Create new profile
 const createProfile = async (req, res) => {
     try {
@@ -24,6 +29,22 @@ const createProfile = async (req, res) => {
         } = req.body;
 
         let photoUrl = null;
+
+        if (name) {
+            const normalizedInputName = normalizeName(name);
+            
+            const existingProfile = await queryOne(
+                'SELECT id FROM profile WHERE LOWER(TRIM(REPLACE(name, "  ", " "))) = ?',
+                [normalizedInputName]
+            );
+
+            if (existingProfile) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'A profile with this name already exists'
+                });
+            }
+        }
 
         // Handle photo upload if provided
         if (photo) {
