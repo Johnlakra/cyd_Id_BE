@@ -17,28 +17,28 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 // CORS configuration
-const corsOptions = {
-    origin: function (origin, callback) {
-        // Allow requests with no origin (mobile apps, Postman, etc.)
-        if (!origin) return callback(null, true);
+// const corsOptions = {
+//     origin: function (origin, callback) {
+//         // Allow requests with no origin (mobile apps, Postman, etc.)
+//         if (!origin) return callback(null, true);
         
-        const allowedOrigins = process.env.ALLOWED_ORIGINS 
-            ? process.env.ALLOWED_ORIGINS.split(',')
-            : ['http://localhost:3000', 'http://localhost:3001'];
+//         const allowedOrigins = process.env.ALLOWED_ORIGINS 
+//             ? process.env.ALLOWED_ORIGINS.split(',')
+//             : ['http://localhost:3000', 'http://localhost:3001'];
         
-        if (allowedOrigins.includes(origin)) {
-            callback(null, true);
-        } else {
-            callback(new Error('Not allowed by CORS'));
-        }
-    },
-    credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
-};
+//         if (allowedOrigins.includes(origin)) {
+//             callback(null, true);
+//         } else {
+//             callback(new Error('Not allowed by CORS'));
+//         }
+//     },
+//     credentials: true,
+//     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+//     allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
+// };
 
 // Middleware
-app.use(cors(corsOptions));
+app.use(cors());
 app.use(express.json({ limit: '10mb' })); // Increased limit for base64 images
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
