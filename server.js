@@ -67,60 +67,60 @@ app.use('/api/auth', authRoutes);
 app.use('/api/profiles', profileRoutes);
 
 // Welcome endpoint
-app.get('/', (req, res) => {
-    res.json({
-        success: true,
-        message: 'Welcome to Profile Management API',
-        version: '1.0.0',
-        endpoints: {
-            auth: {
-                registration: 'POST /api/auth/register',
-                login: 'POST /api/auth/login',
-                logout: 'POST /api/auth/logout',
-                profile: 'GET /api/auth/profile',
-                updateProfile: 'PUT /api/auth/profile',
-                changePassword: 'PUT /api/auth/change-password'
-            },
-            profiles: {
-                create: 'POST /api/profiles',
-                getAll: 'GET /api/profiles',
-                getById: 'GET /api/profiles/:id',
-                update: 'PUT /api/profiles/:id',
-                delete: 'DELETE /api/profiles/:id',
-                stats: 'GET /api/profiles/stats (Admin only)'
-            }
-        },
-        documentation: 'See README.md for detailed API documentation'
-    });
-});
+// app.get('/', (req, res) => {
+//     res.json({
+//         success: true,
+//         message: 'Welcome to Profile Management API',
+//         version: '1.0.0',
+//         endpoints: {
+//             auth: {
+//                 registration: 'POST /api/auth/register',
+//                 login: 'POST /api/auth/login',
+//                 logout: 'POST /api/auth/logout',
+//                 profile: 'GET /api/auth/profile',
+//                 updateProfile: 'PUT /api/auth/profile',
+//                 changePassword: 'PUT /api/auth/change-password'
+//             },
+//             profiles: {
+//                 create: 'POST /api/profiles',
+//                 getAll: 'GET /api/profiles',
+//                 getById: 'GET /api/profiles/:id',
+//                 update: 'PUT /api/profiles/:id',
+//                 delete: 'DELETE /api/profiles/:id',
+//                 stats: 'GET /api/profiles/stats (Admin only)'
+//             }
+//         },
+//         documentation: 'See README.md for detailed API documentation'
+//     });
+// });
 
 // Error handling middleware
-app.use((error, req, res, next) => {
-    console.error('Error:', error);
+// app.use((error, req, res, next) => {
+//     console.error('Error:', error);
 
-    // Handle CORS errors
-    if (error.message === 'Not allowed by CORS') {
-        return res.status(403).json({
-            success: false,
-            message: 'CORS policy violation'
-        });
-    }
+//     // Handle CORS errors
+//     if (error.message === 'Not allowed by CORS') {
+//         return res.status(403).json({
+//             success: false,
+//             message: 'CORS policy violation'
+//         });
+//     }
 
-    // Handle JSON parsing errors
-    if (error instanceof SyntaxError && error.status === 400 && 'body' in error) {
-        return res.status(400).json({
-            success: false,
-            message: 'Invalid JSON in request body'
-        });
-    }
+//     // Handle JSON parsing errors
+//     if (error instanceof SyntaxError && error.status === 400 && 'body' in error) {
+//         return res.status(400).json({
+//             success: false,
+//             message: 'Invalid JSON in request body'
+//         });
+//     }
 
-    // Default error response
-    res.status(error.status || 500).json({
-        success: false,
-        message: error.message || 'Internal server error',
-        error: process.env.NODE_ENV === 'development' ? error.stack : undefined
-    });
-});
+//     // Default error response
+//     res.status(error.status || 500).json({
+//         success: false,
+//         message: error.message || 'Internal server error',
+//         error: process.env.NODE_ENV === 'development' ? error.stack : undefined
+//     });
+// });
 
 // Handle 404 routes
 app.use('*', (req, res) => {
