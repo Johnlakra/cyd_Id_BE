@@ -107,7 +107,7 @@ Create a new profile (requires authentication)
     "postal_address": "123 Main St",
     "parish": "St. Mary's",
     "deanery": "Central",
-    "educational_qualification": "Bachelor's Degree",
+    "qualification": "Bachelor's Degree",
     "phone": "+1234567890",
     "involvement": "Active member",
     "photo": "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQ..."

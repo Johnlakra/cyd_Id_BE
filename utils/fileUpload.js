@@ -2,11 +2,11 @@
 const fs = require('fs').promises;
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
+const cloudinary = require('./cloudinaryConfig');
 
 // Ensure upload directory exists
 const ensureUploadDir = async () => {
     const uploadDir = process.env.UPLOAD_DIR || './uploads';
-    
     try {
         await fs.access(uploadDir);
     } catch (error) {
@@ -42,65 +42,89 @@ const getFileExtensionFromBase64 = (base64String) => {
 // Save base64 image to file
 const saveBase64Image = async (base64String) => {
     try {
-        // Ensure upload directory exists
-        const uploadDir = await ensureUploadDir();
+        const result = await cloudinary.uploader.upload(base64String, {
+            folder: 'profile_photos',
+            resource_type: 'auto'
+        });
         
-        // Get file extension
-        const extension = getFileExtensionFromBase64(base64String);
-        if (!extension) {
-            throw new Error('Unsupported image format. Supported formats: JPEG, PNG, GIF, BMP, WebP');
-        }
-        
-        // Extract base64 data
-        const base64Data = base64String.split(',')[1];
-        if (!base64Data) {
-            throw new Error('Invalid base64 format');
-        }
-        
-        // Convert base64 to buffer
-        const imageBuffer = Buffer.from(base64Data, 'base64');
-        
-        // Check file size
-        const maxSize = parseInt(process.env.MAX_FILE_SIZE) || 5242880; // 5MB default
-        if (imageBuffer.length > maxSize) {
-            throw new Error(`File size too large. Maximum size: ${Math.round(maxSize / 1024 / 1024)}MB`);
-        }
-        
-        // Generate unique filename
-        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-        const uniqueId = uuidv4().substring(0, 8);
-        const filename = `${timestamp}-${uniqueId}.${extension}`;
-        const filepath = path.join(uploadDir, filename);
-        
-        // Save file
-        await fs.writeFile(filepath, imageBuffer);
-        
-        console.log(`📸 Image saved: ${filename}`);
-        return filename;
-        
+        return result.secure_url; // Return the Cloudinary URL
     } catch (error) {
-        console.error('File upload error:', error);
-        throw error;
+        throw new Error(`Cloudinary upload failed: ${error.message}`);
     }
 };
 
+// const saveBase64Image = async (base64String) => {
+//     try {
+//         // Ensure upload directory exists
+//         const uploadDir = await ensureUploadDir();
+        
+//         // Get file extension
+//         const extension = getFileExtensionFromBase64(base64String);
+//         if (!extension) {
+//             throw new Error('Unsupported image format. Supported formats: JPEG, PNG, GIF, BMP, WebP');
+//         }
+        
+//         // Extract base64 data
+//         const base64Data = base64String.split(',')[1];
+//         if (!base64Data) {
+//             throw new Error('Invalid base64 format');
+//         }
+        
+//         // Convert base64 to buffer
+//         const imageBuffer = Buffer.from(base64Data, 'base64');
+        
+//         // Check file size
+//         const maxSize = parseInt(process.env.MAX_FILE_SIZE) || 5242880; // 5MB default
+//         if (imageBuffer.length > maxSize) {
+//             throw new Error(`File size too large. Maximum size: ${Math.round(maxSize / 1024 / 1024)}MB`);
+//         }
+        
+//         // Generate unique filename
+//         const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+//         const uniqueId = uuidv4().substring(0, 8);
+//         const filename = `${timestamp}-${uniqueId}.${extension}`;
+//         const filepath = path.join(uploadDir, filename);
+        
+//         // Save file
+//         await fs.writeFile(filepath, imageBuffer);
+        
+//         console.log(`📸 Image saved: ${filename}`);
+//         return filename;
+        
+//     } catch (error) {
+//         console.error('File upload error:', error);
+//         throw error;
+//     }
+// };
+
 // Delete file if it exists
-const deleteFile = async (filename) => {
-    if (!filename) return;
-    
+const deleteFile = async (imageUrl) => {
     try {
-        const uploadDir = process.env.UPLOAD_DIR || './uploads';
-        const filepath = path.join(uploadDir, filename);
-        
-        await fs.access(filepath);
-        await fs.unlink(filepath);
-        
-        console.log(`🗑️ File deleted: ${filename}`);
+        if (imageUrl && imageUrl.includes('cloudinary')) {
+            const publicId = imageUrl.split('/').pop().split('.')[0];
+            await cloudinary.uploader.destroy(`profile_photos/${publicId}`);
+        }
     } catch (error) {
-        // File doesn't exist or couldn't be deleted - not critical
-        console.log(`⚠️ Could not delete file: ${filename}`);
+        console.log('Failed to delete from Cloudinary:', error.message);
     }
 };
+
+// const deleteFile = async (filename) => {
+//     if (!filename) return;
+    
+//     try {
+//         const uploadDir = process.env.UPLOAD_DIR || './uploads';
+//         const filepath = path.join(uploadDir, filename);
+        
+//         await fs.access(filepath);
+//         await fs.unlink(filepath);
+        
+//         console.log(`🗑️ File deleted: ${filename}`);
+//     } catch (error) {
+//         // File doesn't exist or couldn't be deleted - not critical
+//         console.log(`⚠️ Could not delete file: ${filename}`);
+//     }
+// };
 
 // Get file info
 const getFileInfo = async (filename) => {
