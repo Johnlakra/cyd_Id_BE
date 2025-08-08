@@ -30,22 +30,6 @@ const createProfile = async (req, res) => {
 
         let photoUrl = null;
 
-        if (name) {
-            const normalizedInputName = normalizeName(name);
-            
-            const existingProfile = await queryOne(
-                'SELECT id FROM profile WHERE LOWER(TRIM(REPLACE(name, "  ", " "))) = ?',
-                [normalizedInputName]
-            );
-
-            if (existingProfile) {
-                return res.status(400).json({
-                    success: false,
-                    message: 'A profile with this name already exists'
-                });
-            }
-        }
-
         // Handle photo upload if provided
         if (photo) {
             const validation = validateBase64Image(photo);
