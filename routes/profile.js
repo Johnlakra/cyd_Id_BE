@@ -18,12 +18,18 @@ router.post('/', [
 ], profileController.createProfile);
 
 // @route   GET /api/profiles
-// @desc    Get profiles with pagination
+// @desc    Get profiles with advanced filtering and pagination
 // @access  Private
 router.get('/', [
     authenticateToken,
     validatePagination
 ], profileController.getProfiles);
+
+// @route   GET /api/profiles/filter-options
+// @desc    Get available filter options for dropdowns
+// @access  Private
+// IMPORTANT: This route must come BEFORE the /:id route to avoid conflicts
+router.get('/filter-options', authenticateToken, profileController.getFilterOptions);
 
 // @route   GET /api/profiles/stats
 // @desc    Get profile statistics
