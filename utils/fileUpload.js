@@ -41,11 +41,13 @@ const getFileExtensionFromBase64 = (base64String) => {
 
 // Save base64 image to file
 const saveBase64Image = async (base64String) => {
+    console.log(base64String, "base64String")
     try {
         const result = await cloudinary.uploader.upload(base64String, {
-            folder: 'profile_photos',
+            folder: 'test_photos',
             resource_type: 'auto'
         });
+        console.log({result})
         
         return result.secure_url; // Return the Cloudinary URL
     } catch (error) {
@@ -151,6 +153,11 @@ const getFileInfo = async (filename) => {
 // Validate base64 image
 const validateBase64Image = (base64String) => {
     if (!base64String) return { valid: false, error: 'No image provided' };
+
+    // If it's a URL, consider it valid
+    if (base64String.startsWith('http://') || base64String.startsWith('https://')) {
+        return { valid: true };
+    }
     
     // Check format
     if (!base64String.startsWith('data:image/')) {

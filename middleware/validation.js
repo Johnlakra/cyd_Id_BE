@@ -108,6 +108,10 @@ const validateProfile = [
     body('photo')
         .optional()
         .custom((value) => {
+            // Check if it's a valid URL (for existing photos)
+            if (value && (value.startsWith('http://') || value.startsWith('https://'))) {
+            return true;
+            }
             // Check if it's a valid base64 image
             if (value && !value.match(/^data:image\/(jpeg|jpg|png|gif|bmp|webp);base64,/)) {
                 throw new Error('Photo must be a valid base64 image (jpeg, png, gif, bmp, webp)');

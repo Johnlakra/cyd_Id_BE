@@ -55,10 +55,10 @@ const createProfile = async (req, res) => {
             INSERT INTO profile (
                 name, father, mother, dob, designation, level, date_of_baptism,
                 postal_address, parish, deanery, qualification, phone, involvement,
-                photo_url,issue_date, created_by
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,?)
+                photo_url,issue_date, created_by, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,?, NOW(), NOW())
         `, [
-            name,
+            normalizeName(name),
             father_name || null,
             mother_name || null,
             date_of_birth || null,
@@ -392,30 +392,38 @@ const updateProfile = async (req, res) => {
 
         let photoUrl = existingProfile.photo_url;
 
-        // Handle photo update
+       // Handle photo update
         if (photo) {
+        // Check if it's a URL (existing photo) or base64 (new photo)
+        if (photo.startsWith('http://') || photo.startsWith('https://')) {
+            // It's an existing URL, keep it as is
+            photoUrl = photo;
+        } else {
+            // It's a base64 image, validate and upload
             const validation = validateBase64Image(photo);
             if (!validation.valid) {
-                return res.status(400).json({
-                    success: false,
-                    message: validation.error
-                });
+            return res.status(400).json({
+                success: false,
+                message: validation.error
+            });
             }
 
             try {
-                // Delete old photo if exists
-                if (existingProfile.photo_url) {
-                    await deleteFile(existingProfile.photo_url);
-                }
-
-                // Save new photo
-                photoUrl = await saveBase64Image(photo);
-            } catch (error) {
-                return res.status(400).json({
-                    success: false,
-                    message: `Photo upload failed: ${error.message}`
-                });
+            // Delete old photo if exists and is a URL
+            if (existingProfile.photo_url && 
+                (existingProfile.photo_url.startsWith('http://') || existingProfile.photo_url.startsWith('https://'))) {
+                await deleteFile(existingProfile.photo_url);
             }
+
+            // Save new photo
+            photoUrl = await saveBase64Image(photo);
+            } catch (error) {
+            return res.status(400).json({
+                success: false,
+                message: `Photo upload failed: ${error.message}`
+            });
+            }
+        }
         }
 
         // Update profile
@@ -424,7 +432,7 @@ const updateProfile = async (req, res) => {
                 name = ?, father = ?, mother = ?, dob = ?, designation = ?,
                 level = ?, date_of_baptism = ?, postal_address = ?, parish = ?,
                 deanery = ?, qualification = ?, phone = ?, involvement = ?,
-                photo_url = ?, updated_at = CURRENT_TIMESTAMP
+                photo_url = ?, issue_date = ?, updated_at = CURRENT_TIMESTAMP
             WHERE id = ?
         `, [
             name,
@@ -441,7 +449,7 @@ const updateProfile = async (req, res) => {
             phone || null,
             involvement || null,
             photoUrl,
-            issue_date,
+            issue_date || null,
             profileId
         ]);
 
