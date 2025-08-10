@@ -6,7 +6,8 @@ const profileController = require('../controllers/profileController');
 const { authenticateToken, requireAdmin } = require('../middleware/auth');
 const { 
     validateProfile,
-    validatePagination
+    validatePagination,
+    validateLimitedProfile
 } = require('../middleware/validation');
 
 // @route   POST /api/profiles
@@ -44,6 +45,14 @@ router.get('/stats', [
 // @access  Private
 router.get('/:id', authenticateToken, profileController.getProfileById);
 
+// @route   PUT /api/profiles/update-limited
+// @desc    Update limited profile fields (photo, qualification, postal_address) for profile holders
+// @access  Private (Profile holder only)
+router.put('/update-limited', [
+    authenticateToken,
+    validateLimitedProfile // Use the new validation
+], profileController.updateLimitedProfile);
+
 // @route   PUT /api/profiles/:id
 // @desc    Update profile
 // @access  Private
@@ -52,9 +61,9 @@ router.put('/:id', [
     validateProfile
 ], profileController.updateProfile);
 
+
 // @route   DELETE /api/profiles/:id
 // @desc    Delete profile
 // @access  Private
-router.delete('/:id', authenticateToken, profileController.deleteProfile);
-
+router.delete('/:id', authenticateToken, profileController.softDeleteProfile);
 module.exports = router;

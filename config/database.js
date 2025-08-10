@@ -58,7 +58,7 @@ const initDatabase = async () => {
                 username VARCHAR(50) UNIQUE NOT NULL,
                 email VARCHAR(100) UNIQUE NOT NULL,
                 password VARCHAR(255) NOT NULL,
-                role ENUM('admin', 'user') DEFAULT 'user',
+                role ENUM('admin', 'user', 'profile_holder') DEFAULT 'user',
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
             )
@@ -67,27 +67,31 @@ const initDatabase = async () => {
         console.log('Creating profile table...');
         await query(`
             CREATE TABLE IF NOT EXISTS profile (
-                id INT PRIMARY KEY AUTO_INCREMENT,
-                name VARCHAR(100) NOT NULL,
-                father VARCHAR(100),
-                mother VARCHAR(100),
-                dob DATE,
-                designation VARCHAR(100),
-                level VARCHAR(50),
-                date_of_baptism DATE,
-                postal_address TEXT,
-                parish VARCHAR(100),
-                deanery VARCHAR(100),
-                qualification TEXT,
-                phone VARCHAR(20),
-                involvement TEXT,
-                photo_url VARCHAR(255),
-                created_by INT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                FOREIGN KEY (created_by) REFERENCES users(id)
-            )
-        `);
+            id INT PRIMARY KEY AUTO_INCREMENT,
+            name VARCHAR(100) NOT NULL,
+            father VARCHAR(100),
+            mother VARCHAR(100),
+            dob DATE,
+            designation VARCHAR(100),
+            level VARCHAR(50),
+            date_of_baptism DATE,
+            postal_address TEXT,
+            parish VARCHAR(100),
+            deanery VARCHAR(100),
+            qualification TEXT,
+            phone VARCHAR(20),
+            involvement TEXT,
+            photo_url VARCHAR(255),
+            issue_date DATE,
+            status TINYINT DEFAULT 1,
+            profile_user_id INT,
+            created_by INT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            FOREIGN KEY (created_by) REFERENCES users(id),
+            FOREIGN KEY (profile_user_id) REFERENCES users(id)
+        )
+    `);
 
         console.log('Creating indexes (with error handling)...');
         

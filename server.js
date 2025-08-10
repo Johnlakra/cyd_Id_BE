@@ -9,6 +9,7 @@ const { ensureUploadDir } = require('./utils/fileUpload');
 // Import routes
 const authRoutes = require('./routes/auth');
 const profileRoutes = require('./routes/profile');
+const profileHolderRoutes = require('./routes/profileHolder');
 
 // Initialize Express app
 const app = express();
@@ -42,6 +43,7 @@ app.get('/health', (req, res) => {
 // API Routes
 app.use('/auth', authRoutes);
 app.use('/profiles', profileRoutes);
+app.use('/profile-holder', profileHolderRoutes);
 
 // Handle 404 routes
 // app.use('*', (req, res) => {

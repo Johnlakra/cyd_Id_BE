@@ -38,8 +38,8 @@ const validateRegistration = [
     
     body('role')
         .optional()
-        .isIn(['admin', 'user'])
-        .withMessage('Role must be either admin or user'),
+        .isIn(['admin', 'user', 'profile_holder'])
+        .withMessage('Role must be admin, user, or profile_holder'),
     
     handleValidationErrors
 ];
@@ -128,6 +128,23 @@ const validateProfile = [
     handleValidationErrors
 ];
 
+const validateLimitedProfile = [
+    body('photo').optional().custom((value) => {
+        // Check if it's a valid URL (for existing photos)
+        if (value && (value.startsWith('http://') || value.startsWith('https://'))) {
+            return true;
+        }
+        // Check if it's a valid base64 image
+        if (value && !value.match(/^data:image\/(jpeg|jpg|png|gif|bmp|webp);base64,/)) {
+            throw new Error('Photo must be a valid base64 image (jpeg, png, gif, bmp, webp)');
+        }
+        return true;
+    }),
+    body('qualification').optional().isLength({ max: 200 }).withMessage('Qualification must not exceed 200 characters'),
+    body('postal_address').optional().isLength({ max: 500 }).withMessage('Postal address must not exceed 500 characters'),
+    handleValidationErrors
+];
+
 // Pagination validation
 const validatePagination = [
     query('page')
@@ -152,6 +169,7 @@ module.exports = {
     validateRegistration,
     validateLogin,
     validateProfile,
+    validateLimitedProfile,
     validatePagination,
     handleValidationErrors
 };

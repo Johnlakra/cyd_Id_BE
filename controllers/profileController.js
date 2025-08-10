@@ -1,13 +1,68 @@
 // controllers/profileController.js - Profile management controller
 const { query, queryOne } = require('../config/database');
 const { saveBase64Image, deleteFile, validateBase64Image } = require('../utils/fileUpload');
+const bcrypt = require('bcryptjs');
 
 // Helper function to normalize name for comparison
 const normalizeName = (name) => {
     return name ? name.trim().replace(/\s+/g, ' ').toLowerCase() : null;
 };
 
-// Create new profile
+// Helper function to generate username
+const generateUsername = (name, dateOfBirth) => {
+    // Get first 4 letters of name, remove spaces and special characters
+    const namePrefix = name.trim()
+        .replace(/\s+/g, '') // Remove all spaces
+        .replace(/[^a-zA-Z]/g, '') // Remove all non-letter characters
+        .substring(0, 4)
+        .toLowerCase();
+    
+    // Parse date to get day and month (YYYY-MM-DD format)
+    const dateParts = dateOfBirth.split('-');
+    const day = dateParts[2]; // DD
+    const month = dateParts[1]; // MM
+    
+    // Format: first4letters + DD + MM
+    return namePrefix + day + month;
+};
+
+// Helper function to create profile holder account
+const createProfileHolderAccount = async (name, dateOfBirth, phone) => {
+    try {
+        let username = generateUsername(name, dateOfBirth);
+        const password = phone.replace(/\D/g, ''); // Remove non-digit characters
+        
+        // Check if username already exists and make it unique
+        let existingUser = await queryOne('SELECT id FROM users WHERE username = ?', [username]);
+        let counter = 1;
+        
+        while (existingUser) {
+            username = generateUsername(name, dateOfBirth) + counter;
+            existingUser = await queryOne('SELECT id FROM users WHERE username = ?', [username]);
+            counter++;
+        }
+        
+        // Hash password
+        const hashedPassword = await bcrypt.hash(password, 12);
+        
+        // Create user account
+        const result = await query(
+            'INSERT INTO users (username, email, password, role) VALUES (?, ?, ?, ?)',
+            [username, `${username}@profile.local`, hashedPassword, 'profile_holder']
+        );
+        
+        return {
+            userId: result.insertId,
+            username: username,
+            password: phone // Return original phone for response
+        };
+    } catch (error) {
+        console.error('Error creating profile holder account:', error);
+        throw error;
+    }
+};
+
+// Update the createProfile function (replace the existing one)
 const createProfile = async (req, res) => {
     try {
         const {
@@ -28,7 +83,14 @@ const createProfile = async (req, res) => {
             issue_date
         } = req.body;
 
+        // Check for soft-deleted profile with same name and phone
+        const deletedProfile = await queryOne(
+            'SELECT * FROM profile WHERE name = ? AND phone = ? AND status = 0',
+            [normalizeName(name), phone]
+        );
+
         let photoUrl = null;
+        let profileHolderAccount = null;
 
         // Handle photo upload if provided
         if (photo) {
@@ -41,7 +103,7 @@ const createProfile = async (req, res) => {
             }
 
             try {
-            photoUrl = await saveBase64Image(photo);
+                photoUrl = await saveBase64Image(photo);
             } catch (error) {
                 return res.status(400).json({
                     success: false,
@@ -50,43 +112,82 @@ const createProfile = async (req, res) => {
             }
         }
 
-        // Insert profile into database
-        const result = await query(`
-            INSERT INTO profile (
-                name, father, mother, dob, designation, level, date_of_baptism,
-                postal_address, parish, deanery, qualification, phone, involvement,
-                photo_url,issue_date, created_by, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,?, NOW(), NOW())
-        `, [
-            normalizeName(name),
-            father_name || null,
-            mother_name || null,
-            date_of_birth || null,
-            designation || null,
-            level || null,
-            date_of_baptism || null,
-            postal_address || null,
-            parish || null,
-            deanery || null,
-            qualification || null,
-            phone || null,
-            involvement || null,
-            photoUrl,
-            issue_date || null,
-            req.user.id
-        ]);
+        // Create profile holder account
+        try {
+            profileHolderAccount = await createProfileHolderAccount(name, date_of_birth, phone);
+        } catch (error) {
+            return res.status(500).json({
+                success: false,
+                message: 'Failed to create profile holder account'
+            });
+        }
 
-        // Get the created profile
+        let profileId;
+
+        if (deletedProfile) {
+            // First, delete the old profile_user_id account if it exists
+            if (deletedProfile.profile_user_id) {
+                await query('DELETE FROM users WHERE id = ?', [deletedProfile.profile_user_id]);
+            }
+            
+            // Create fresh profile holder account
+            profileHolderAccount = await createProfileHolderAccount(name, date_of_birth, phone);
+            
+            // Update the soft-deleted profile with new data
+            await query(`
+                UPDATE profile SET
+                    name = ?, father = ?, mother = ?, dob = ?, designation = ?,
+                    level = ?, date_of_baptism = ?, postal_address = ?, parish = ?,
+                    deanery = ?, qualification = ?, phone = ?, involvement = ?,
+                    photo_url = ?, issue_date = ?, profile_user_id = ?, status = 1,
+                    created_by = ?, updated_at = NOW()
+                WHERE id = ?
+            `, [
+                normalizeName(name), father_name || null, mother_name || null,
+                date_of_birth || null, designation || null, level || null,
+                date_of_baptism || null, postal_address || null, parish || null,
+                deanery || null, qualification || null, phone || null,
+                involvement || null, photoUrl, issue_date || null,
+                profileHolderAccount.userId, req.user.id, deletedProfile.id
+            ]);
+            
+            profileId = deletedProfile.id;
+        } else {
+            // Create new profile
+            const result = await query(`
+                INSERT INTO profile (
+                    name, father, mother, dob, designation, level, date_of_baptism,
+                    postal_address, parish, deanery, qualification, phone, involvement,
+                    photo_url, issue_date, status, profile_user_id, created_by, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, NOW(), NOW())
+            `, [
+                normalizeName(name), father_name || null, mother_name || null,
+                date_of_birth || null, designation || null, level || null,
+                date_of_baptism || null, postal_address || null, parish || null,
+                deanery || null, qualification || null, phone || null,
+                involvement || null, photoUrl, issue_date || null,
+                profileHolderAccount.userId, req.user.id
+            ]);
+            
+            profileId = result.insertId;
+        }
+
+        // Get the created/restored profile
         const createdProfile = await queryOne(
             'SELECT * FROM profile WHERE id = ?',
-            [result.insertId]
+            [profileId]
         );
 
         res.status(201).json({
             success: true,
-            message: 'Profile created successfully',
+            message: deletedProfile ? 'Profile restored successfully' : 'Profile created successfully',
             data: {
-                profile: createdProfile
+                profile: createdProfile,
+                credentials: {
+                    username: profileHolderAccount.username,
+                    password: profileHolderAccount.password,
+                    message: 'These credentials have been created for the profile holder to login'
+                }
             }
         });
 
@@ -121,50 +222,58 @@ const getProfiles = async (req, res) => {
         let whereConditions = [];
         let queryParams = [];
 
-        // Base permission check - Regular users can only see their own profiles
-        if (req.user.role !== 'admin') {
+        whereConditions.push('p.status = 1');
+
+        // Base permission check - Profile holders can only see their own profile
+        if (req.user.role === 'profile_holder') {
+            whereConditions.push('p.profile_user_id = ?');
+            queryParams.push(req.user.id);
+        } else if (req.user.role !== 'admin') {
+            // Regular users can only see their own created profiles
             whereConditions.push('p.created_by = ?');
             queryParams.push(req.user.id);
         }
 
-        // Apply filters
-        if (deanery && deanery.trim()) {
-            whereConditions.push('p.deanery = ?');
-            queryParams.push(deanery.trim());
-        }
+        // Apply filters only for admin and regular users (not profile holders)
+        if (req.user.role !== 'profile_holder') {
+            if (deanery && deanery.trim()) {
+                whereConditions.push('p.deanery = ?');
+                queryParams.push(deanery.trim());
+            }
 
-        if (parish && parish.trim()) {
-            whereConditions.push('p.parish = ?');
-            queryParams.push(parish.trim());
-        }
+            if (parish && parish.trim()) {
+                whereConditions.push('p.parish = ?');
+                queryParams.push(parish.trim());
+            }
 
-        if (level && level.trim()) {
-            whereConditions.push('p.level = ?');
-            queryParams.push(level.trim());
-        }
+            if (level && level.trim()) {
+                whereConditions.push('p.level = ?');
+                queryParams.push(level.trim());
+            }
 
-        if (designation && designation.trim()) {
-            whereConditions.push('p.designation = ?');
-            queryParams.push(designation.trim());
-        }
+            if (designation && designation.trim()) {
+                whereConditions.push('p.designation = ?');
+                queryParams.push(designation.trim());
+            }
 
-        // Search functionality - searches across multiple fields
-        if (search && search.trim()) {
-            const searchTerm = `%${search.trim()}%`;
-            whereConditions.push(`(
-                p.name LIKE ? OR 
-                p.father LIKE ? OR 
-                p.mother LIKE ? OR 
-                p.phone LIKE ? OR 
-                p.parish LIKE ? OR 
-                p.deanery LIKE ? OR 
-                p.designation LIKE ? OR 
-                p.qualification LIKE ? OR
-                p.postal_address LIKE ?
-            )`);
-            // Add search term for each field
-            for (let i = 0; i < 9; i++) {
-                queryParams.push(searchTerm);
+            // Search functionality - searches across multiple fields
+            if (search && search.trim()) {
+                const searchTerm = `%${search.trim()}%`;
+                whereConditions.push(`(
+                    p.name LIKE ? OR 
+                    p.father LIKE ? OR 
+                    p.mother LIKE ? OR 
+                    p.phone LIKE ? OR 
+                    p.parish LIKE ? OR 
+                    p.deanery LIKE ? OR 
+                    p.designation LIKE ? OR 
+                    p.qualification LIKE ? OR
+                    p.postal_address LIKE ?
+                )`);
+                // Add search term for each field
+                for (let i = 0; i < 9; i++) {
+                    queryParams.push(searchTerm);
+                }
             }
         }
 
@@ -178,7 +287,7 @@ const getProfiles = async (req, res) => {
         const sortDirection = ['ASC', 'DESC'].includes(sort_order.toUpperCase()) ? 
             sort_order.toUpperCase() : 'DESC';
 
-        // Build profile query using your working pattern
+        // Build profile query
         const profileQuery = `
             SELECT 
                 p.*,
@@ -234,15 +343,19 @@ const getProfiles = async (req, res) => {
     }
 };
 
-// Get filter options for dropdowns - NEW
+// Get filter options for dropdowns
 const getFilterOptions = async (req, res) => {
     try {
-        let whereClause = '';
+        let whereClause = 'WHERE status = 1';
         let params = [];
 
-        // Regular users can only see their own profiles' filter options
-        if (req.user.role !== 'admin') {
-            whereClause = 'WHERE created_by = ?';
+        // Profile holders can only see their own profiles' filter options
+        if (req.user.role === 'profile_holder') {
+            whereClause += ' AND profile_user_id = ?';
+            params.push(req.user.id);
+        } else if (req.user.role !== 'admin') {
+            // Regular users can only see their own created profiles' filter options
+            whereClause += ' AND created_by = ?';
             params.push(req.user.id);
         }
 
@@ -477,6 +590,134 @@ const updateProfile = async (req, res) => {
     }
 };
 
+// Add new function for profile holders to update their limited fields
+const updateLimitedProfile = async (req, res) => {
+    try {
+        const { photo, qualification, postal_address } = req.body;
+
+        // Get profile holder's profile
+        const profile = await queryOne(
+            'SELECT * FROM profile WHERE profile_user_id = ? AND status = 1',
+            [req.user.id]
+        );
+
+        if (!profile) {
+            return res.status(404).json({
+                success: false,
+                message: 'Profile not found'
+            });
+        }
+
+        let photoUrl = profile.photo_url;
+
+        // Handle photo update - Same logic as profileController
+        if (photo) {
+            // Check if it's a URL (existing photo) or base64 (new photo)
+            if (photo.startsWith('http://') || photo.startsWith('https://')) {
+                // It's an existing URL, keep it as is
+                photoUrl = photo;
+            } else {
+                // It's a base64 image, validate and upload
+                const validation = validateBase64Image(photo);
+                if (!validation.valid) {
+                    return res.status(400).json({
+                        success: false,
+                        message: validation.error
+                    });
+                }
+
+                try {
+                    // Delete old photo if exists and is a URL
+                    if (profile.photo_url && 
+                        (profile.photo_url.startsWith('http://') || profile.photo_url.startsWith('https://'))) {
+                        await deleteFile(profile.photo_url);
+                    }
+
+                    // Save new photo
+                    photoUrl = await saveBase64Image(photo);
+                } catch (error) {
+                    return res.status(400).json({
+                        success: false,
+                        message: `Photo upload failed: ${error.message}`
+                    });
+                }
+            }
+        }
+
+        // Update profile
+        await query(`
+            UPDATE profile SET
+                photo_url = ?, qualification = ?, postal_address = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE profile_user_id = ? AND status = 1
+        `, [
+            photoUrl,
+            qualification || profile.qualification,
+            postal_address || profile.postal_address,
+            req.user.id
+        ]);
+
+        // Get updated profile
+        const updatedProfile = await queryOne(
+            'SELECT * FROM profile WHERE profile_user_id = ? AND status = 1',
+            [req.user.id]
+        );
+
+        res.json({
+            success: true,
+            message: 'Profile updated successfully',
+            data: { profile: updatedProfile }
+        });
+
+    } catch (error) {
+        console.error('Update limited profile error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to update profile',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+// Soft delete function
+const softDeleteProfile = async (req, res) => {
+    try {
+        const profileId = parseInt(req.params.id);
+
+        let whereClause = 'WHERE id = ? AND status = 1';
+        let params = [profileId];
+
+        if (req.user.role !== 'admin') {
+            whereClause += ' AND created_by = ?';
+            params.push(req.user.id);
+        }
+
+        const profile = await queryOne(`SELECT * FROM profile ${whereClause}`, params);
+
+        if (!profile) {
+            return res.status(404).json({
+                success: false,
+                message: 'Profile not found or access denied'
+            });
+        }
+
+        // Soft delete profile
+        await query('UPDATE profile SET status = 0, updated_at = NOW() WHERE id = ?', [profileId]);
+
+        res.json({
+            success: true,
+            message: 'Profile deleted successfully'
+        });
+
+    } catch (error) {
+        console.error('Soft delete profile error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to delete profile',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
 // Delete profile
 const deleteProfile = async (req, res) => {
     try {
@@ -563,6 +804,8 @@ module.exports = {
     getFilterOptions, // NEW - Add this to exports
     getProfileById,
     updateProfile,
-    deleteProfile,
-    getProfileStats
+    updateLimitedProfile,
+    deleteProfile: softDeleteProfile,
+    getProfileStats,
+    softDeleteProfile
 };
