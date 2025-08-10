@@ -47,10 +47,33 @@ The following features need to be implemented in the current application:
 - `PUT /profile/update-limited` - Update only photo, qualification, postal_address
 - `GET /profile/my-id-card` - Generate/view own ID card
 - `PUT /profile/change-password` - Change login password
+- `DELETE /profile/:id/soft-delete` - Soft delete profile (set status = 0)
+- `PUT /profile/:id/restore` - Restore deleted profile (set status = 1)
+- `GET /profiles/deleted` - View deleted profiles (admin only)
 
-### 6. Database Schema Updates Needed
+### 6. Soft Delete System Implementation
+- **Status-based deletion**: Add `status` column (1 = active, 0 = deleted)
+- **Soft delete process**: DELETE requests set status = 0 instead of removing record
+- **Profile restoration**: When creating profile with same name/phone as deleted one:
+  - Check if deleted profile exists (status = 0)
+  - If found, update deleted profile with new data and set status = 1
+  - If not found, create new profile normally
+- **Query filtering**: All profile listings filter WHERE status = 1 by default
+- **Admin management**: Admins can view deleted profiles and restore them
+- **Data integrity**: Maintains historical data while appearing deleted to users
+
+### 6. Soft Delete Functionality
+- **Add status column**: Add `status` TINYINT column to profile table (default: 1)
+- **Soft delete implementation**: Instead of permanent deletion, set status = 0
+- **Profile restoration**: When creating a profile with same details as deleted one, restore by setting status = 1
+- **Filter active profiles**: All profile queries should filter WHERE status = 1
+- **Admin view deleted**: Admins should have option to view deleted profiles (status = 0)
+- **Duplicate prevention**: Check for existing deleted profiles before creating new ones
+
+### 7. Database Schema Updates Needed
 - Add `profile_user_id` field to profile table to link with auto-generated user account
 - Add "profile_holder" to user role enum
+- Add `status` TINYINT DEFAULT 1 to profile table for soft delete
 - Create relationship between profiles and their individual user accounts
 
 ---
