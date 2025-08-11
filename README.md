@@ -1,5 +1,83 @@
 # Backend Setup Guide and API Documentation
 
+## 🚨 Missing Functionality Requirements
+
+The following features need to be implemented in the current application:
+
+### Current System Overview
+- **Admin Role**: Can create, view, edit, and delete all profiles
+- **User Role**: Can only view profiles (limited functionality)
+- **Profile Creation**: Only admins can create profiles
+- **Authentication**: Only admin/user login system exists
+
+### Required New Features
+
+### 1. Automatic Login Credential Generation for Profile Holders
+- **Auto-generate username**: When admin creates a profile, automatically create login credentials:
+  - Username: First 4 letters of name + first 4 digits of birth date
+  - Example: "Johnathan" + DOB "20/07/2000" → Username: "john2007"
+- **Auto-set password**: Use the phone number as the default password
+- **New user type**: Create "profile_holder" role in addition to admin/user roles
+
+### 2. Profile Holder Login System
+- **Individual login**: Each profile holder gets their own login credentials
+- **Separate authentication**: Profile holders login to access their personal data only
+- **Role distinction**: 
+  - Admin: Manages all profiles
+  - User: Limited system access  
+  - Profile Holder: Can only access their own profile
+
+### 3. Limited Edit Permissions for Profile Holders
+- **Restricted editing**: Profile holders can ONLY edit these 3 fields:
+  - Profile photo/photo_url
+  - Qualification
+  - Postal address
+- **No access to**: Name, father/mother names, dates, parish, deanery, phone, etc.
+- **Self-service updates**: Profile holders can update their own limited fields
+
+### 4. Personal Dashboard for Profile Holders
+- **Simple interface**: Basic dashboard showing only their profile information
+- **ID card view**: Profile holders can view and download their own ID card
+- **No admin features**: Cannot see other profiles or admin functions
+- **Limited navigation**: Only profile view and limited edit options
+
+### 5. New API Endpoints Required
+- `POST /auth/profile-holder-login` - Login endpoint for profile holders
+- `GET /profile/my-profile` - Get own profile data (profile holders only)
+- `PUT /profile/update-limited` - Update only photo, qualification, postal_address
+- `GET /profile/my-id-card` - Generate/view own ID card
+- `PUT /profile/change-password` - Change login password
+- `DELETE /profile/:id/soft-delete` - Soft delete profile (set status = 0)
+- `PUT /profile/:id/restore` - Restore deleted profile (set status = 1)
+- `GET /profiles/deleted` - View deleted profiles (admin only)
+
+### 6. Soft Delete System Implementation
+- **Status-based deletion**: Add `status` column (1 = active, 0 = deleted)
+- **Soft delete process**: DELETE requests set status = 0 instead of removing record
+- **Profile restoration**: When creating profile with same name/phone as deleted one:
+  - Check if deleted profile exists (status = 0)
+  - If found, update deleted profile with new data and set status = 1
+  - If not found, create new profile normally
+- **Query filtering**: All profile listings filter WHERE status = 1 by default
+- **Admin management**: Admins can view deleted profiles and restore them
+- **Data integrity**: Maintains historical data while appearing deleted to users
+
+### 6. Soft Delete Functionality
+- **Add status column**: Add `status` TINYINT column to profile table (default: 1)
+- **Soft delete implementation**: Instead of permanent deletion, set status = 0
+- **Profile restoration**: When creating a profile with same details as deleted one, restore by setting status = 1
+- **Filter active profiles**: All profile queries should filter WHERE status = 1
+- **Admin view deleted**: Admins should have option to view deleted profiles (status = 0)
+- **Duplicate prevention**: Check for existing deleted profiles before creating new ones
+
+### 7. Database Schema Updates Needed
+- Add `profile_user_id` field to profile table to link with auto-generated user account
+- Add "profile_holder" to user role enum
+- Add `status` TINYINT DEFAULT 1 to profile table for soft delete
+- Create relationship between profiles and their individual user accounts
+
+---
+
 ## 📋 Setup Instructions
 
 ### 1. Database Setup
