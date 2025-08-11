@@ -112,28 +112,34 @@ const createProfile = async (req, res) => {
             }
         }
 
-        // Create profile holder account
-        try {
-            profileHolderAccount = await createProfileHolderAccount(name, date_of_birth, phone);
-        } catch (error) {
-            return res.status(500).json({
-                success: false,
-                message: 'Failed to create profile holder account'
-            });
-        }
-
         let profileId;
 
         if (deletedProfile) {
-            // First, delete the old profile_user_id account if it exists
-            if (deletedProfile.profile_user_id) {
-                await query('DELETE FROM users WHERE id = ?', [deletedProfile.profile_user_id]);
+            // Check if there's a soft-deleted user account
+            const baseUsername = generateUsername(name, date_of_birth);
+            const deletedUser = await queryOne(
+                'SELECT * FROM users WHERE username LIKE ? AND role = "profile_holder" AND status = 0 ORDER BY id DESC LIMIT 1',
+                [`${baseUsername}%`]
+            );
+
+            if (deletedUser) {
+                // Reactivate the existing user account
+                const hashedPassword = await bcrypt.hash(phone.replace(/\D/g, ''), 12);
+                await query(
+                    'UPDATE users SET status = 1, password = ?, updated_at = NOW() WHERE id = ?',
+                    [hashedPassword, deletedUser.id]
+                );
+                profileHolderAccount = {
+                    userId: deletedUser.id,
+                    username: deletedUser.username,
+                    password: phone
+                };
+            } else {
+                // Create new profile holder account
+                profileHolderAccount = await createProfileHolderAccount(name, date_of_birth, phone);
             }
-            
-            // Create fresh profile holder account
-            profileHolderAccount = await createProfileHolderAccount(name, date_of_birth, phone);
-            
-            // Update the soft-deleted profile with new data
+
+            // Restore deleted profile with new data
             await query(`
                 UPDATE profile SET
                     name = ?, father = ?, mother = ?, dob = ?, designation = ?,
@@ -153,6 +159,9 @@ const createProfile = async (req, res) => {
             
             profileId = deletedProfile.id;
         } else {
+            // Create new profile holder account
+            profileHolderAccount = await createProfileHolderAccount(name, date_of_birth, phone);
+            
             // Create new profile
             const result = await query(`
                 INSERT INTO profile (
@@ -702,6 +711,11 @@ const softDeleteProfile = async (req, res) => {
 
         // Soft delete profile
         await query('UPDATE profile SET status = 0, updated_at = NOW() WHERE id = ?', [profileId]);
+
+        // Soft delete associated user account if exists
+        if (profile.profile_user_id) {
+            await query('UPDATE users SET status = 0, updated_at = NOW() WHERE id = ? AND role = "profile_holder"', [profile.profile_user_id]);
+        }
 
         res.json({
             success: true,

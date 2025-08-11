@@ -47,7 +47,6 @@ const saveBase64Image = async (base64String) => {
             folder: 'test_photos',
             resource_type: 'auto'
         });
-        console.log({result})
         
         return result.secure_url; // Return the Cloudinary URL
     } catch (error) {

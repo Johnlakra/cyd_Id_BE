@@ -75,7 +75,7 @@ const login = async (req, res) => {
 
         // Find user by username or email
         const user = await queryOne(
-            'SELECT id, username, email, password, role FROM users WHERE username = ? OR email = ?',
+            'SELECT id, username, email, password, role FROM users WHERE (username = ? OR email = ?) AND status = 1',
             [username, username]
         );
 

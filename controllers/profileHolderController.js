@@ -19,7 +19,7 @@ const profileHolderLogin = async (req, res) => {
 
         // Find profile holder by username
         const user = await queryOne(
-            'SELECT id, username, password, role FROM users WHERE username = ? AND role = "profile_holder"',
+            'SELECT id, username, password, role FROM users WHERE username = ? AND role = "profile_holder" AND status = 1',
             [username]
         );
 
