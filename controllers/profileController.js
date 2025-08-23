@@ -267,18 +267,18 @@ const getProfiles = async (req, res) => {
 
             // Search functionality - searches across multiple fields
             if (search && search.trim()) {
-                const searchTerm = `%${search.trim()}%`;
-                whereConditions.push(`(
-                    p.name LIKE ? OR 
-                    p.father LIKE ? OR 
-                    p.mother LIKE ? OR 
-                    p.phone LIKE ? OR 
-                    p.parish LIKE ? OR 
-                    p.deanery LIKE ? OR 
-                    p.designation LIKE ? OR 
-                    p.qualification LIKE ? OR
-                    p.postal_address LIKE ?
-                )`);
+            const searchTerm = `%${search.trim().toLowerCase()}%`;
+            whereConditions.push(`(
+                LOWER(p.name) LIKE ? OR 
+                LOWER(p.father) LIKE ? OR 
+                LOWER(p.mother) LIKE ? OR 
+                p.phone LIKE ? OR 
+                LOWER(p.parish) LIKE ? OR 
+                LOWER(p.deanery) LIKE ? OR 
+                LOWER(p.designation) LIKE ? OR 
+                LOWER(p.qualification) LIKE ? OR
+                LOWER(p.postal_address) LIKE ?
+            )`);
                 // Add search term for each field
                 for (let i = 0; i < 9; i++) {
                     queryParams.push(searchTerm);
