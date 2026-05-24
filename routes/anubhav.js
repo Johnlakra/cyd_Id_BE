@@ -14,6 +14,7 @@ const accommodationController = require('../controllers/anubhavAccommodationCont
 const allotmentController = require('../controllers/anubhavAllotmentController');
 const timetableController = require('../controllers/anubhavTimetableController');
 const announcementController = require('../controllers/anubhavAnnouncementController');
+const participantController = require('../controllers/anubhavParticipantController');
 
 // Phase 1 endpoints all require an event role (LOC or DEXCO) and a valid place.
 // requirePlaceAccess additionally enforces LOC -> loc_place scoping.
@@ -26,6 +27,12 @@ router.use(authenticateToken, loadEventRole);
 // @desc    Get the caller's event_role + loc_place
 // @access  Authenticated
 router.get('/me/role', roleController.getMyRole);
+
+// @route   GET /anubhav/my/event
+// @desc    Participant self-view: registration, room+roommates, timetable, live, announcements.
+//          Self-scoped (resolved from req.user.id) — no place param, no role gate.
+// @access  Authenticated (any user, including youth with no event role)
+router.get('/my/event', participantController.getMyEvent);
 
 // @route   POST /anubhav/roles/grant
 // @desc    Grant an event role to a profile holder (admin or DEXCO)

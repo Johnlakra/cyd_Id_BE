@@ -240,10 +240,147 @@ async function run() {
   if (annId) await del('/anubhav/announcements/' + annId, token);
   if (dioAnnId) await del('/anubhav/announcements/' + dioAnnId, token);
 
-  // Clean up: delete registration
+  // Clean up: delete registration (from section 10 eligible test)
   if (regId) {
     const delReg = await del('/anubhav/registrations/' + regId, token);
     assert('DELETE /anubhav/registrations/:id 200', delReg.status === 200, delReg.status);
+  }
+
+  // ── 14. Phase 4 — Participant self-view + Role close ───────────────────────
+  console.log('\n[14] Phase 4 — Participant self-view + Role close');
+
+  // 14a. No token → 401
+  const noTokenMyEvent = await get('/anubhav/my/event', null);
+  assert('GET /anubhav/my/event no token → 401', noTokenMyEvent.status === 401, noTokenMyEvent.status);
+
+  // 14b. Admin has no linked profile → registered:false
+  await query('UPDATE users SET event_role=?,loc_place=NULL WHERE username=?', ['none', 'admin']);
+  const myEventUnreg = await get('/anubhav/my/event', token);
+  assert('GET /anubhav/my/event 200', myEventUnreg.status === 200, myEventUnreg.status);
+  assert('unregistered user → registered:false', myEventUnreg.body.data?.registered === false, JSON.stringify(myEventUnreg.body.data));
+
+  // Restore admin to dexco for grant tests
+  await query('UPDATE users SET event_role=?,loc_place=NULL WHERE username=?', ['dexco', 'admin']);
+
+  // 14c–f. Grant flow tests
+  const targetUser = await queryOne('SELECT id FROM users WHERE username != ? LIMIT 1', ['admin']);
+  if (targetUser) {
+    // grant 'loc' without place → 400
+    const grantNoPlace = await post('/anubhav/roles/grant', { user_id: targetUser.id, event_role: 'loc' }, token);
+    assert('grant loc without place → 400', grantNoPlace.status === 400, grantNoPlace.status + ': ' + grantNoPlace.body?.message);
+
+    // grant 'loc' with valid place → 200, loc_place set
+    const grantLoc = await post('/anubhav/roles/grant', { user_id: targetUser.id, event_role: 'loc', loc_place: 'phagwara' }, token);
+    assert('grant loc phagwara → 200', grantLoc.status === 200, grantLoc.status + ': ' + grantLoc.body?.message);
+    assert('loc_place set on grant', grantLoc.body.data?.user?.loc_place === 'phagwara', JSON.stringify(grantLoc.body.data?.user));
+
+    // grant 'none' → deassign, loc_place cleared
+    const grantNone = await post('/anubhav/roles/grant', { user_id: targetUser.id, event_role: 'none' }, token);
+    assert('grant none → 200 (deassign)', grantNone.status === 200, grantNone.status + ': ' + grantNone.body?.message);
+    assert('loc_place NULL after none', grantNone.body.data?.user?.loc_place === null, JSON.stringify(grantNone.body.data?.user));
+
+    // re-grant 'loc' to a different place → works
+    const regrant = await post('/anubhav/roles/grant', { user_id: targetUser.id, event_role: 'loc', loc_place: 'abohar' }, token);
+    assert('re-grant loc abohar → 200', regrant.status === 200, regrant.status + ': ' + regrant.body?.message);
+
+    // cleanup grant target
+    await query('UPDATE users SET event_role=?,loc_place=NULL WHERE id=?', ['none', targetUser.id]);
+  }
+
+  // 14g. Allotted youth: room + roommates present, phone absent
+  // Requires roomId from section 11 (room was created, floor+building kept for this test).
+  if (roomId) {
+    const adminRow = await queryOne('SELECT id FROM users WHERE username = ?', ['admin']);
+
+    // Ensure admin has a linked profile (insert minimal one if absent)
+    let adminProfileId = null;
+    let createdAdminProfile = false;
+    const existingAdminProfile = await queryOne(
+      'SELECT id FROM profile WHERE profile_user_id = ? AND status = 1', [adminRow.id]
+    );
+    if (existingAdminProfile) {
+      adminProfileId = existingAdminProfile.id;
+    } else {
+      const pRes = await query(
+        `INSERT INTO profile
+           (name, father, mother, dob, designation, level, date_of_baptism,
+            postal_address, parish, deanery, qualification, phone, involvement,
+            photo_url, issue_date, status, profile_user_id, created_by, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, NOW())`,
+        ['E2E Admin Youth', 'E2E Father', 'E2E Mother', '2005-01-01',
+         'Youth', 'YCS', '2010-01-01', 'E2E Address', 'E2E Parish',
+         'Hoshiarpur', 'Graduate', '9999999999', 'None', 'placeholder.jpg',
+         '2026-01-01', adminRow.id, adminRow.id]
+      );
+      adminProfileId = pRes.insertId;
+      createdAdminProfile = true;
+    }
+
+    // Register admin's profile for phagwara (handle existing rows gracefully)
+    let adminRegId = null;
+    const existingAdminReg = await queryOne(
+      'SELECT id, status FROM anubhav_registrations WHERE profile_id = ? AND place = ?', [adminProfileId, 'phagwara']
+    );
+    if (!existingAdminReg) {
+      const rRes = await query(
+        `INSERT INTO anubhav_registrations (place, profile_id, fee_amount, status, created_by)
+         VALUES (?, ?, 50, 1, ?)`, ['phagwara', adminProfileId, adminRow.id]
+      );
+      adminRegId = rRes.insertId;
+    } else {
+      await query('UPDATE anubhav_registrations SET status=1 WHERE id=?', [existingAdminReg.id]);
+      adminRegId = existingAdminReg.id;
+    }
+
+    // Allot admin's registration to the test room
+    let adminAllotId = null;
+    const existingAdminAllot = await queryOne('SELECT id FROM anubhav_allotments WHERE registration_id=?', [adminRegId]);
+    if (!existingAdminAllot) {
+      const aRes = await query('INSERT INTO anubhav_allotments (room_id, registration_id) VALUES (?, ?)', [roomId, adminRegId]);
+      adminAllotId = aRes.insertId;
+    } else {
+      adminAllotId = existingAdminAllot.id;
+    }
+
+    // Create a roommate (profile without a user login) and allot to same room
+    const rpRes = await query(
+      `INSERT INTO profile
+         (name, father, mother, dob, designation, level, date_of_baptism,
+          postal_address, parish, deanery, qualification, phone, involvement,
+          photo_url, issue_date, status, created_by, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, NOW())`,
+      ['E2E Roommate', 'E2E Father', 'E2E Mother', '2005-01-01',
+       'Youth', 'YCS', '2010-01-01', 'E2E Address', 'Roommate Parish',
+       'Hoshiarpur', 'Graduate', '8888888888', 'None', 'placeholder.jpg',
+       '2026-01-01', adminRow.id]
+    );
+    const roommateProfileId = rpRes.insertId;
+    const rrRes = await query(
+      `INSERT INTO anubhav_registrations (place, profile_id, fee_amount, status, created_by) VALUES (?, ?, 50, 1, ?)`,
+      ['phagwara', roommateProfileId, adminRow.id]
+    );
+    const roommateRegId = rrRes.insertId;
+    const raRes = await query('INSERT INTO anubhav_allotments (room_id, registration_id) VALUES (?, ?)', [roomId, roommateRegId]);
+    const roommateAllotId = raRes.insertId;
+
+    // Call GET /anubhav/my/event as admin (whose profile is now registered + allotted)
+    const myEventAllotted = await get('/anubhav/my/event', token);
+    assert('allotted youth → registered:true', myEventAllotted.body.data?.registered === true,
+      JSON.stringify(myEventAllotted.body.data));
+    assert('allotted youth → room info present', !!myEventAllotted.body.data?.room,
+      JSON.stringify(myEventAllotted.body.data));
+    const roommates = myEventAllotted.body.data?.room?.roommates || [];
+    assert('roommate list non-empty', roommates.length >= 1, 'count=' + roommates.length);
+    assert('roommate phone absent', !roommates.some(r => 'phone' in r), JSON.stringify(roommates));
+
+    // Cleanup roommate
+    await query('DELETE FROM anubhav_allotments WHERE id=?', [roommateAllotId]);
+    await query('UPDATE anubhav_registrations SET status=0 WHERE id=?', [roommateRegId]);
+    await query('UPDATE profile SET status=0 WHERE id=?', [roommateProfileId]);
+    // Cleanup admin allotment + registration + profile
+    if (adminAllotId && !existingAdminAllot) await query('DELETE FROM anubhav_allotments WHERE id=?', [adminAllotId]);
+    await query('UPDATE anubhav_registrations SET status=0 WHERE id=?', [adminRegId]);
+    if (createdAdminProfile) await query('UPDATE profile SET status=0 WHERE id=?', [adminProfileId]);
   }
 
   // Restore admin event_role to none

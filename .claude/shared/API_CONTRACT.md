@@ -56,6 +56,30 @@ GET   /anubhav/announcements?place=  -> active announcements for that place + di
 DELETE/anubhav/announcements/:id
 ```
 
+## Phase 4 — Participant self-view
+```
+GET   /anubhav/my/event                      -> self-scoped; no place param; no event-role required
+      Resolves: users.id → profile (profile_user_id) → anubhav_registrations (status=1)
+      Response: {
+        registered: bool,
+        // if registered=false, no further fields
+        place: "phagwara"|"abohar"|"amritsar",
+        venue: null,                          // reserved; not yet in schema
+        dates: ["YYYY-MM-DD", ...],           // distinct days from timetable
+        room: {
+          building: string,
+          floor: string,
+          room: string,
+          roommates: [{ name, parish }]       // name + parish ONLY — no phone (participant-facing)
+        } | null,
+        timetable: [...],                     // same shape as GET /anubhav/timetable
+        live: { now: item|null, next: item|null },
+        announcements: [...]                  // place-scoped + diocese-wide combined
+      }
+```
+**Role deassign path:** `POST /anubhav/roles/grant` with `event_role: "none"` is the deassign
+path — it clears `loc_place` to `null`. No separate deassign endpoint is needed.
+
 ## Notes for the frontend session
 - All list endpoints already return counts where useful; do fee math display only,
   never recompute authoritative totals client-side.
