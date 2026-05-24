@@ -6,7 +6,9 @@
   "scripts": {
     "start": "node server.js",
     "dev": "nodemon server.js",
-    "init-db": "node scripts/initDatabase.js"
+    "init-db": "node scripts/initDatabase.js",
+    "migrate-anubhav": "node scripts/runAnubhavMigration.js",
+    "test:anubhav-e2e": "node scripts/anubhav-e2e.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

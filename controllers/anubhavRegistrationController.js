@@ -47,12 +47,13 @@ const listEligible = async (req, res) => {
         }
         if (search && search.trim()) {
             const term = `%${search.trim().toLowerCase()}%`;
-            conditions.push(`(LOWER(p.name) LIKE ? OR p.phone LIKE ? OR LOWER(p.parish) LIKE ?)`);
-            params.push(term, term, term);
+            conditions.push(`(LOWER(p.name) LIKE ? OR p.phone LIKE ? OR LOWER(p.parish) LIKE ? OR LOWER(p.deanery) LIKE ? OR LOWER(p.father) LIKE ?)`);
+            params.push(term, term, term, term, term);
         }
 
         const profiles = await query(`
-            SELECT p.id, p.name, p.phone, p.deanery, p.parish, p.level, p.designation
+            SELECT p.id, p.name, p.father AS father_name, p.phone, p.deanery, p.parish,
+                   p.level, p.designation, p.photo_url
             FROM profile p
             WHERE ${conditions.join(' AND ')}
             ORDER BY p.deanery, p.parish, p.name
@@ -62,7 +63,7 @@ const listEligible = async (req, res) => {
         res.json({
             success: true,
             message: 'Eligible youth retrieved',
-            data: { place, profiles, count: profiles.length }
+            data: profiles
         });
     } catch (error) {
         console.error('listEligible error:', error);
@@ -101,15 +102,29 @@ const createRegistration = async (req, res) => {
             });
         }
 
-        // Reject duplicate registration cleanly (UNIQUE KEY uniq_place_profile also enforces).
+        // Check for any existing registration (active or soft-deleted).
+        // Active → 409. Soft-deleted → re-activate rather than insert (avoids unique-key 500).
         const existing = await queryOne(
-            'SELECT id FROM anubhav_registrations WHERE place = ? AND profile_id = ? AND status = 1',
+            'SELECT id, status FROM anubhav_registrations WHERE place = ? AND profile_id = ?',
             [place, profile_id]
         );
         if (existing) {
-            return res.status(409).json({
-                success: false,
-                message: 'Profile is already registered for this place'
+            if (existing.status === 1) {
+                return res.status(409).json({
+                    success: false,
+                    message: 'Profile is already registered for this place'
+                });
+            }
+            // Re-activate the soft-deleted row.
+            await query(
+                'UPDATE anubhav_registrations SET status=1, chaperone_id=?, created_by=?, created_at=NOW() WHERE id=?',
+                [chaperone_id || null, req.user.id, existing.id]
+            );
+            const reactivated = await queryOne('SELECT * FROM anubhav_registrations WHERE id=?', [existing.id]);
+            return res.status(201).json({
+                success: true,
+                message: 'Registration re-activated',
+                data: { registration: reactivated, warnings: [] }
             });
         }
 
@@ -207,10 +222,12 @@ const listRegistrations = async (req, res) => {
                 r.created_at,
                 p.id            AS profile_id,
                 p.name,
+                p.father        AS father_name,
                 p.phone,
                 p.deanery,
                 p.parish,
                 p.level,
+                p.photo_url,
                 c.id            AS chaperone_id,
                 c.name          AS chaperone_name,
                 c.type          AS chaperone_type

@@ -277,6 +277,7 @@ const getRoomingData = async (req, res) => {
                 r.id   AS room_id,      r.name AS room_name,      r.capacity AS room_capacity,
                 a.id   AS allotment_id,
                 p.id   AS profile_id,   p.name AS occupant_name,
+                p.father AS occupant_father_name,
                 p.phone AS occupant_phone, p.parish AS occupant_parish,
                 p.deanery AS occupant_deanery
             FROM anubhav_buildings b
@@ -312,6 +313,7 @@ const getRoomingData = async (req, res) => {
                     allotment_id: row.allotment_id,
                     profile_id: row.profile_id,
                     name: row.occupant_name,
+                    father_name: row.occupant_father_name || null,
                     phone: row.occupant_phone,
                     parish: row.occupant_parish,
                     deanery: row.occupant_deanery
