@@ -230,6 +230,7 @@ const listRegistrations = async (req, res) => {
                 p.photo_url,
                 c.id            AS chaperone_id,
                 c.name          AS chaperone_name,
+                c.phone         AS chaperone_phone,
                 c.type          AS chaperone_type
             FROM anubhav_registrations r
             JOIN profile p              ON p.id = r.profile_id

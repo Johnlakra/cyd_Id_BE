@@ -133,7 +133,88 @@ const deleteAllotment = async (req, res) => {
     }
 };
 
+// POST /anubhav/allotments/batch  { room_id, registration_ids: [] }
+// Allots multiple youth to a room in one call. Validates capacity upfront, then
+// loops — each insertion is independent so partial success is reported.
+const createAllotmentBatch = async (req, res) => {
+    try {
+        const { room_id, registration_ids } = req.body;
+        if (!room_id || !Array.isArray(registration_ids) || !registration_ids.length) {
+            return res.status(400).json({
+                success: false,
+                message: 'room_id and registration_ids[] are required'
+            });
+        }
+
+        const room = await queryOne(`
+            SELECT r.id, r.capacity, b.place,
+                (SELECT COUNT(*) FROM anubhav_allotments WHERE room_id = r.id) AS occupancy
+            FROM anubhav_rooms r
+            JOIN anubhav_floors f    ON f.id = r.floor_id
+            JOIN anubhav_buildings b ON b.id = f.building_id
+            WHERE r.id = ?
+        `, [room_id]);
+        if (!room) {
+            return res.status(404).json({ success: false, message: 'Room not found' });
+        }
+        if (locScopeBlocked(req, room.place)) {
+            return res.status(403).json({
+                success: false,
+                message: 'LOC users may only allot rooms within their assigned place'
+            });
+        }
+
+        const vacant = Number(room.capacity) - Number(room.occupancy);
+        if (registration_ids.length > vacant) {
+            return res.status(409).json({
+                success: false,
+                message: `Room only has ${vacant} vacant slot(s); ${registration_ids.length} requested`
+            });
+        }
+
+        const succeeded = [], failed = [];
+        for (const registration_id of registration_ids) {
+            const reg = await queryOne(
+                'SELECT id, place FROM anubhav_registrations WHERE id = ? AND status = 1',
+                [registration_id]
+            );
+            if (!reg) { failed.push({ registration_id, reason: 'Registration not found' }); continue; }
+            if (reg.place !== room.place) { failed.push({ registration_id, reason: 'Registration belongs to a different place' }); continue; }
+
+            const existing = await queryOne(
+                'SELECT id FROM anubhav_allotments WHERE registration_id = ?',
+                [registration_id]
+            );
+            if (existing) { failed.push({ registration_id, reason: 'Already allotted to a room' }); continue; }
+
+            try {
+                const result = await query(
+                    'INSERT INTO anubhav_allotments (room_id, registration_id) VALUES (?, ?)',
+                    [room_id, registration_id]
+                );
+                succeeded.push({ id: result.insertId, room_id: Number(room_id), registration_id: Number(registration_id) });
+            } catch (err) {
+                failed.push({ registration_id, reason: err.message });
+            }
+        }
+
+        res.status(201).json({
+            success: true,
+            message: `${succeeded.length} allotted, ${failed.length} failed`,
+            data: { succeeded, failed }
+        });
+    } catch (error) {
+        console.error('createAllotmentBatch error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to create allotments',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
 module.exports = {
     createAllotment,
+    createAllotmentBatch,
     deleteAllotment
 };

@@ -11,8 +11,14 @@ Standard response envelope (unchanged from existing app): `{ success, message, d
 ## Roles / promotion
 ```
 GET   /anubhav/me/role                      -> { event_role, loc_place }
-POST  /anubhav/roles/grant   (admin; dexco may grant loc) { profile_id, event_role, loc_place? }
+POST  /anubhav/roles/grant   (admin; dexco may grant loc)
+                             body: { profile_id|user_id, event_role, loc_place? }
+                             // profile_id OR user_id — one is required
 GET   /anubhav/roles                         (admin) -> list of granted users
+GET   /anubhav/users/search?q=               (admin) -> search profiles by name/phone
+                             -> [{ profile_id, profile_name, phone, deanery, parish, photo_url,
+                                   user_id|null, username, email, system_role, event_role, loc_place }]
+                             // user_id=null means no login account; cannot be promoted
 ```
 
 ## Registration (Phase 1)

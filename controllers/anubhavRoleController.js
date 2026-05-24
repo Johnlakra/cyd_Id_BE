@@ -24,10 +24,10 @@ const grantRole = async (req, res) => {
     try {
         const { profile_id, event_role, loc_place } = req.body;
 
-        if (!profile_id || !EVENT_ROLES.includes(event_role)) {
+        if ((!profile_id && !req.body.user_id) || !EVENT_ROLES.includes(event_role)) {
             return res.status(400).json({
                 success: false,
-                message: `profile_id and event_role (${EVENT_ROLES.join('|')}) are required`
+                message: `profile_id or user_id, plus event_role (${EVENT_ROLES.join('|')}), are required`
             });
         }
 
@@ -61,37 +61,52 @@ const grantRole = async (req, res) => {
             place = loc_place;
         }
 
-        // Resolve profile -> linked user.
-        const profile = await queryOne(
-            'SELECT id, name, profile_user_id FROM profile WHERE id = ? AND status = 1',
-            [profile_id]
-        );
-        if (!profile) {
-            return res.status(404).json({ success: false, message: 'Profile not found' });
-        }
-        if (!profile.profile_user_id) {
-            return res.status(400).json({
-                success: false,
-                message: 'Profile has no linked user account'
-            });
+        // Resolve to a user_id — accept either profile_id or direct user_id.
+        const { user_id } = req.body;
+        let targetUserId, profileName = null, resolvedProfileId = null;
+
+        if (user_id) {
+            const u = await queryOne('SELECT id, username FROM users WHERE id = ?', [user_id]);
+            if (!u) {
+                return res.status(404).json({ success: false, message: 'User not found' });
+            }
+            targetUserId = u.id;
+            profileName = u.username;
+        } else {
+            const profile = await queryOne(
+                'SELECT id, name, profile_user_id FROM profile WHERE id = ? AND status = 1',
+                [profile_id]
+            );
+            if (!profile) {
+                return res.status(404).json({ success: false, message: 'Profile not found' });
+            }
+            if (!profile.profile_user_id) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Profile has no linked user account'
+                });
+            }
+            targetUserId = profile.profile_user_id;
+            profileName = profile.name;
+            resolvedProfileId = profile.id;
         }
 
         await query(
             'UPDATE users SET event_role = ?, loc_place = ?, updated_at = NOW() WHERE id = ?',
-            [event_role, place, profile.profile_user_id]
+            [event_role, place, targetUserId]
         );
 
         const updated = await queryOne(
             'SELECT id, username, event_role, loc_place FROM users WHERE id = ?',
-            [profile.profile_user_id]
+            [targetUserId]
         );
 
         res.json({
             success: true,
             message: 'Event role granted',
             data: {
-                profile_id: profile.id,
-                profile_name: profile.name,
+                profile_id: resolvedProfileId,
+                profile_name: profileName,
                 user: updated
             }
         });
@@ -141,8 +156,58 @@ const listRoles = async (req, res) => {
     }
 };
 
+// GET /anubhav/users/search?q=   (admin only)
+// Searches profiles by name or phone and returns the match along with the
+// linked user's current event role. Profiles without a linked user account
+// are included but flagged so the UI can show "no login account".
+const searchUsers = async (req, res) => {
+    try {
+        const q = (req.query.q || '').trim();
+        if (!q) {
+            return res.status(400).json({ success: false, message: 'q (search term) is required' });
+        }
+
+        const term = `%${q.toLowerCase()}%`;
+        const rows = await query(`
+            SELECT
+                p.id           AS profile_id,
+                p.name         AS profile_name,
+                p.phone,
+                p.deanery,
+                p.parish,
+                p.photo_url,
+                u.id           AS user_id,
+                u.username,
+                u.email,
+                u.role         AS system_role,
+                u.event_role,
+                u.loc_place
+            FROM profile p
+            LEFT JOIN users u ON u.id = p.profile_user_id
+            WHERE p.status = 1
+              AND (LOWER(p.name) LIKE ? OR p.phone LIKE ? OR LOWER(p.father) LIKE ?)
+            ORDER BY p.name
+            LIMIT 30
+        `, [term, term, term]);
+
+        res.json({
+            success: true,
+            message: 'Users found',
+            data: { results: rows, count: rows.length }
+        });
+    } catch (error) {
+        console.error('searchUsers error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Search failed',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
 module.exports = {
     getMyRole,
     grantRole,
-    listRoles
+    listRoles,
+    searchUsers
 };

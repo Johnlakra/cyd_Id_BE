@@ -42,6 +42,16 @@ router.get('/roles', (req, res, next) => {
     next();
 }, roleController.listRoles);
 
+// @route   GET /anubhav/users/search?q=
+// @desc    Search profiles by name/phone; returns linked user + event_role (for role management UI)
+// @access  Admin only
+router.get('/users/search', (req, res, next) => {
+    if (req.user.role !== 'admin') {
+        return res.status(403).json({ success: false, message: 'Admin access required' });
+    }
+    next();
+}, roleController.searchUsers);
+
 // ---------- Phase 1: Registration + Fees ----------
 
 // @route   GET /anubhav/eligible?place=&deanery=&parish=&search=
@@ -90,6 +100,7 @@ router.get('/buildings', eventStaff, accommodationController.listBuildings);
 // Only the event-role check happens here; place scoping is enforced in-controller.
 router.post('/floors',     requireEventRole(['loc', 'dexco']), accommodationController.createFloor);
 router.post('/rooms',      requireEventRole(['loc', 'dexco']), accommodationController.createRoom);
+router.post('/allotments/batch', requireEventRole(['loc', 'dexco']), allotmentController.createAllotmentBatch);
 router.post('/allotments', requireEventRole(['loc', 'dexco']), allotmentController.createAllotment);
 router.delete('/allotments/:id', requireEventRole(['loc', 'dexco']), allotmentController.deleteAllotment);
 
