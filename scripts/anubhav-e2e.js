@@ -457,6 +457,139 @@ async function run() {
     if (createdAdminProfile) await query('UPDATE profile SET status=0 WHERE id=?', [adminProfileId]);
   }
 
+  // ── 15. Accommodation DELETE: cascade + role gate + occupant photo_url ─────
+  // Backend additive: DELETE /anubhav/buildings|floors|rooms/:id. Admin/DEXCO only.
+  // Cascade removes child floors/rooms/allotments without orphans. Registrations stay.
+  console.log('\n[15] Accommodation DELETE (cascade + role gate + occupant photo_url)');
+
+  // Pull eligible profiles to register and allot, so cascades have a real allotment to clean.
+  const eligForDel = await get('/anubhav/eligible', token, 'place=phagwara');
+  const eligDelList = eligForDel.body.data?.profiles
+    || (Array.isArray(eligForDel.body.data) ? eligForDel.body.data : []);
+
+  // Helper: create a fresh building->floor->room (and optionally an allotment).
+  const makeAccomTree = async (label, withAllotment) => {
+    const bRes = await post('/anubhav/buildings', { place: 'phagwara', name: 'E2E Del ' + label }, token);
+    const bId  = bRes.body.data?.id || bRes.body.data?.building?.id;
+    const fRes = await post('/anubhav/floors',    { building_id: bId, name: 'F-' + label, level: 1 }, token);
+    const fId  = fRes.body.data?.id || fRes.body.data?.floor?.id;
+    const rRes = await post('/anubhav/rooms',     { floor_id: fId, name: 'R-' + label, capacity: 4 }, token);
+    const rId  = rRes.body.data?.id || rRes.body.data?.room?.id;
+
+    let allotId = null, regIdLocal = null;
+    if (withAllotment && eligDelList.length > 0) {
+      const ep = eligDelList.shift();
+      const reg = await post('/anubhav/registrations', { place: 'phagwara', profile_id: ep.id }, token);
+      regIdLocal = reg.body.data?.id || reg.body.data?.registration?.id;
+      if (regIdLocal) {
+        const a = await post('/anubhav/allotments', { room_id: rId, registration_id: regIdLocal }, token);
+        allotId = a.body.data?.id || a.body.data?.allotment?.id;
+      }
+    }
+    return { bId, fId, rId, allotId, regIdLocal };
+  };
+
+  // 15a. Occupant photo_url present in rooming response (with admin DELETE smoke).
+  const photoTree = await makeAccomTree('photo', true);
+  const roomingForPhoto = await get('/anubhav/rooming', token,
+    'place=phagwara&room_id=' + photoTree.rId);
+  assert('GET /anubhav/rooming 200 (photo check)', roomingForPhoto.status === 200, roomingForPhoto.status);
+  const photoBldgs = roomingForPhoto.body.data?.buildings || [];
+  const photoOccupant = photoBldgs[0]?.floors?.[0]?.rooms?.[0]?.occupants?.[0];
+  if (photoOccupant) {
+    assert('rooming occupant has photo_url key', 'photo_url' in photoOccupant,
+      JSON.stringify(photoOccupant).slice(0, 200));
+  } else {
+    console.log('  SKIP: no occupant available to verify photo_url (eligible list empty?)');
+  }
+  // Tear down via the new DELETE endpoints (admin bypass exercised here).
+  const delPhotoRoom = await del('/anubhav/rooms/' + photoTree.rId, token);
+  assert('admin DELETE /anubhav/rooms/:id 200', delPhotoRoom.status === 200,
+    delPhotoRoom.status + ': ' + delPhotoRoom.body?.message);
+  if (photoTree.regIdLocal) {
+    await query('UPDATE anubhav_registrations SET status=0 WHERE id=?', [photoTree.regIdLocal]);
+  }
+  const delPhotoFloor = await del('/anubhav/floors/' + photoTree.fId, token);
+  assert('admin DELETE /anubhav/floors/:id 200', delPhotoFloor.status === 200,
+    delPhotoFloor.status + ': ' + delPhotoFloor.body?.message);
+  const delPhotoBldg = await del('/anubhav/buildings/' + photoTree.bId, token);
+  assert('admin DELETE /anubhav/buildings/:id 200', delPhotoBldg.status === 200,
+    delPhotoBldg.status + ': ' + delPhotoBldg.body?.message);
+
+  // 15b. LOC must receive 403 on all three deletes.
+  // Downgrade admin in DB to a LOC user; authenticateToken re-reads role per request.
+  const locTree = await makeAccomTree('loc', false);
+  await query("UPDATE users SET role='user', event_role='loc', loc_place='phagwara' WHERE username='admin'");
+
+  const locDelRoom  = await del('/anubhav/rooms/'     + locTree.rId, token);
+  assert('LOC DELETE /anubhav/rooms/:id 403',     locDelRoom.status  === 403, locDelRoom.status  + ': ' + locDelRoom.body?.message);
+  const locDelFloor = await del('/anubhav/floors/'    + locTree.fId, token);
+  assert('LOC DELETE /anubhav/floors/:id 403',    locDelFloor.status === 403, locDelFloor.status + ': ' + locDelFloor.body?.message);
+  const locDelBldg  = await del('/anubhav/buildings/' + locTree.bId, token);
+  assert('LOC DELETE /anubhav/buildings/:id 403', locDelBldg.status  === 403, locDelBldg.status  + ': ' + locDelBldg.body?.message);
+
+  // Restore admin (role + event_role) before continuing.
+  await query("UPDATE users SET role='admin', event_role='dexco', loc_place=NULL WHERE username='admin'");
+  // Clean up the locTree (admin again).
+  await del('/anubhav/rooms/'     + locTree.rId, token);
+  await del('/anubhav/floors/'    + locTree.fId, token);
+  await del('/anubhav/buildings/' + locTree.bId, token);
+
+  // 15c. DEXCO cascade — full chain. Create building/floor/room WITH allotment.
+  const cascadeTree = await makeAccomTree('cascade', true);
+  const allotPre = await queryOne('SELECT id FROM anubhav_allotments WHERE room_id=?', [cascadeTree.rId]);
+  assert('pre: allotment exists under cascade room', !!allotPre, 'room_id=' + cascadeTree.rId);
+
+  const delBuilding = await del('/anubhav/buildings/' + cascadeTree.bId, token);
+  assert('DEXCO DELETE /anubhav/buildings/:id 200', delBuilding.status === 200,
+    delBuilding.status + ': ' + delBuilding.body?.message);
+
+  // Verify NO orphans remain at any level.
+  const orphanBldg  = await queryOne('SELECT id FROM anubhav_buildings  WHERE id=?',      [cascadeTree.bId]);
+  const orphanFloor = await queryOne('SELECT id FROM anubhav_floors     WHERE id=?',      [cascadeTree.fId]);
+  const orphanRoom  = await queryOne('SELECT id FROM anubhav_rooms      WHERE id=?',      [cascadeTree.rId]);
+  const orphanAllot = await queryOne('SELECT id FROM anubhav_allotments WHERE room_id=?', [cascadeTree.rId]);
+  assert('cascade: building row removed', orphanBldg  === null, JSON.stringify(orphanBldg));
+  assert('cascade: floor row removed',    orphanFloor === null, JSON.stringify(orphanFloor));
+  assert('cascade: room row removed',     orphanRoom  === null, JSON.stringify(orphanRoom));
+  assert('cascade: allotments removed',   orphanAllot === null, JSON.stringify(orphanAllot));
+
+  // Registration must NOT be hard-deleted (youth stays registered, just un-allotted).
+  if (cascadeTree.regIdLocal) {
+    const regStill = await queryOne(
+      'SELECT id, status FROM anubhav_registrations WHERE id=?', [cascadeTree.regIdLocal]);
+    assert('cascade: registration row survives (not hard-deleted)', !!regStill,
+      JSON.stringify(regStill));
+    await query('UPDATE anubhav_registrations SET status=0 WHERE id=?', [cascadeTree.regIdLocal]);
+  }
+
+  // 15d. Floor-level cascade (mid-level delete).
+  const floorTree = await makeAccomTree('floor', true);
+  const delFloorMid = await del('/anubhav/floors/' + floorTree.fId, token);
+  assert('DEXCO DELETE /anubhav/floors/:id 200', delFloorMid.status === 200,
+    delFloorMid.status + ': ' + delFloorMid.body?.message);
+  const fOrphanRoom  = await queryOne('SELECT id FROM anubhav_rooms      WHERE id=?',      [floorTree.rId]);
+  const fOrphanAllot = await queryOne('SELECT id FROM anubhav_allotments WHERE room_id=?', [floorTree.rId]);
+  const fOrphanFloor = await queryOne('SELECT id FROM anubhav_floors     WHERE id=?',      [floorTree.fId]);
+  assert('floor-cascade: child room removed',      fOrphanRoom  === null, JSON.stringify(fOrphanRoom));
+  assert('floor-cascade: child allotments removed', fOrphanAllot === null, JSON.stringify(fOrphanAllot));
+  assert('floor-cascade: floor row removed',       fOrphanFloor === null, JSON.stringify(fOrphanFloor));
+  const fSurvivor = await queryOne('SELECT id FROM anubhav_buildings WHERE id=?', [floorTree.bId]);
+  assert('floor-cascade: parent building survives', !!fSurvivor, JSON.stringify(fSurvivor));
+  // Clean up the now-empty building and the registration created for this tree.
+  await del('/anubhav/buildings/' + floorTree.bId, token);
+  if (floorTree.regIdLocal) {
+    await query('UPDATE anubhav_registrations SET status=0 WHERE id=?', [floorTree.regIdLocal]);
+  }
+
+  // 15e. 404 paths
+  const del404Bldg  = await del('/anubhav/buildings/999999999', token);
+  const del404Floor = await del('/anubhav/floors/999999999',    token);
+  const del404Room  = await del('/anubhav/rooms/999999999',     token);
+  assert('DELETE /anubhav/buildings/:id 404 on missing', del404Bldg.status  === 404, del404Bldg.status);
+  assert('DELETE /anubhav/floors/:id 404 on missing',    del404Floor.status === 404, del404Floor.status);
+  assert('DELETE /anubhav/rooms/:id 404 on missing',     del404Room.status  === 404, del404Room.status);
+
   // Restore admin event_role to none
   await query('UPDATE users SET event_role=?,loc_place=NULL WHERE username=?', ['none', 'admin']);
   console.log('\n[Cleanup] Reset admin event_role → none');

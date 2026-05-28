@@ -6,7 +6,7 @@ const express = require('express');
 const router = express.Router();
 
 const { authenticateToken } = require('../middleware/auth');
-const { loadEventRole, requireEventRole, requirePlaceAccess } = require('../middleware/anubhavRole');
+const { loadEventRole, requireEventRole, requireAdminOrDexco, requirePlaceAccess } = require('../middleware/anubhavRole');
 const roleController = require('../controllers/anubhavRoleController');
 const chaperoneController = require('../controllers/anubhavChaperoneController');
 const registrationController = require('../controllers/anubhavRegistrationController');
@@ -119,6 +119,13 @@ router.delete('/allotments/:id', requireEventRole(['loc', 'dexco']), allotmentCo
 // @route   GET /anubhav/rooming?place=&building_id?&floor_id?&room_id?
 // @desc    Hierarchical data shaped for client-side jsPDF rendering
 router.get('/rooming', eventStaff, accommodationController.getRoomingData);
+
+// Destructive accommodation routes are gated to admin OR dexco only (LOC → 403).
+// URL carries no `place`; place scoping is enforced in-controller against the
+// parent building's place for defence-in-depth.
+router.delete('/buildings/:id', requireAdminOrDexco, accommodationController.deleteBuilding);
+router.delete('/floors/:id',    requireAdminOrDexco, accommodationController.deleteFloor);
+router.delete('/rooms/:id',     requireAdminOrDexco, accommodationController.deleteRoom);
 
 // ---------- Phase 3: Timetable + Announcements + Live view ----------
 

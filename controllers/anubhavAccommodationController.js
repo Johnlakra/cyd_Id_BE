@@ -5,7 +5,7 @@
 // Place enforcement: /buildings POST/GET and /rooming GET use requirePlaceAccess
 // upstream. /floors and /rooms POST carry no `place` in the request, so place is
 // derived from the parent row and the LOC scope check happens here.
-const { query, queryOne } = require('../config/database');
+const { query, queryOne, pool } = require('../config/database');
 const { PLACES } = require('../middleware/anubhavRole');
 
 // Resolve a building's place. Returns null if the building does not exist.
@@ -307,7 +307,8 @@ const getRoomingData = async (req, res) => {
                 p.id   AS profile_id,   p.name AS occupant_name,
                 p.father AS occupant_father_name,
                 p.phone AS occupant_phone, p.parish AS occupant_parish,
-                p.deanery AS occupant_deanery
+                p.deanery AS occupant_deanery,
+                p.photo_url AS occupant_photo_url
             FROM anubhav_buildings b
             JOIN anubhav_floors f      ON f.building_id = b.id
             JOIN anubhav_rooms r       ON r.floor_id = f.id
@@ -344,7 +345,8 @@ const getRoomingData = async (req, res) => {
                     father_name: row.occupant_father_name || null,
                     phone: row.occupant_phone,
                     parish: row.occupant_parish,
-                    deanery: row.occupant_deanery
+                    deanery: row.occupant_deanery,
+                    photo_url: row.occupant_photo_url || null
                 });
             }
         }
@@ -376,11 +378,175 @@ const getRoomingData = async (req, res) => {
     }
 };
 
+// Run a multi-step delete inside a transaction so a mid-step failure cannot
+// leave orphaned floors / rooms / allotments. FKs are non-cascading.
+const runInTransaction = async (steps) => {
+    const conn = await pool.getConnection();
+    try {
+        await conn.beginTransaction();
+        for (const [sql, params] of steps) {
+            await conn.execute(sql, params);
+        }
+        await conn.commit();
+    } catch (err) {
+        try { await conn.rollback(); } catch (_) { /* ignore */ }
+        throw err;
+    } finally {
+        conn.release();
+    }
+};
+
+// DELETE /anubhav/buildings/:id  (admin or dexco)
+// Cascade: allotments under this building's rooms -> rooms -> floors -> building.
+// Registrations are NOT touched — youth stay registered, just un-allotted.
+const deleteBuilding = async (req, res) => {
+    try {
+        const id = parseInt(req.params.id, 10);
+        if (!id) {
+            return res.status(400).json({ success: false, message: 'Invalid building id' });
+        }
+
+        const building = await queryOne(
+            'SELECT id, place FROM anubhav_buildings WHERE id = ?',
+            [id]
+        );
+        if (!building) {
+            return res.status(404).json({ success: false, message: 'Building not found' });
+        }
+        // requirePlaceAccess is not in the chain (no `place` in URL), so resolve
+        // and apply LOC scope manually — although requireAdminOrDexco already
+        // rejects LOC, this defends against future route-chain changes.
+        if (locScopeBlocked(req, building.place)) {
+            return res.status(403).json({
+                success: false,
+                message: 'LOC users may only act within their assigned place'
+            });
+        }
+
+        await runInTransaction([
+            [`DELETE a FROM anubhav_allotments a
+              JOIN anubhav_rooms r   ON r.id = a.room_id
+              JOIN anubhav_floors f  ON f.id = r.floor_id
+              WHERE f.building_id = ?`, [id]],
+            [`DELETE r FROM anubhav_rooms r
+              JOIN anubhav_floors f  ON f.id = r.floor_id
+              WHERE f.building_id = ?`, [id]],
+            ['DELETE FROM anubhav_floors WHERE building_id = ?', [id]],
+            ['DELETE FROM anubhav_buildings WHERE id = ?', [id]],
+        ]);
+
+        res.json({
+            success: true,
+            message: 'Building deleted',
+            data: { id }
+        });
+    } catch (error) {
+        console.error('deleteBuilding error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to delete building',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+// DELETE /anubhav/floors/:id  (admin or dexco)
+// Cascade: allotments under this floor's rooms -> rooms -> floor.
+const deleteFloor = async (req, res) => {
+    try {
+        const id = parseInt(req.params.id, 10);
+        if (!id) {
+            return res.status(400).json({ success: false, message: 'Invalid floor id' });
+        }
+
+        const place = await placeOfFloor(id);
+        if (!place) {
+            return res.status(404).json({ success: false, message: 'Floor not found' });
+        }
+        if (locScopeBlocked(req, place)) {
+            return res.status(403).json({
+                success: false,
+                message: 'LOC users may only act within their assigned place'
+            });
+        }
+
+        await runInTransaction([
+            [`DELETE a FROM anubhav_allotments a
+              JOIN anubhav_rooms r ON r.id = a.room_id
+              WHERE r.floor_id = ?`, [id]],
+            ['DELETE FROM anubhav_rooms WHERE floor_id = ?', [id]],
+            ['DELETE FROM anubhav_floors WHERE id = ?', [id]],
+        ]);
+
+        res.json({
+            success: true,
+            message: 'Floor deleted',
+            data: { id }
+        });
+    } catch (error) {
+        console.error('deleteFloor error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to delete floor',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+// DELETE /anubhav/rooms/:id  (admin or dexco)
+// Cascade: allotments of the room -> room.
+const deleteRoom = async (req, res) => {
+    try {
+        const id = parseInt(req.params.id, 10);
+        if (!id) {
+            return res.status(400).json({ success: false, message: 'Invalid room id' });
+        }
+
+        const room = await queryOne(`
+            SELECT r.id, b.place
+            FROM anubhav_rooms r
+            JOIN anubhav_floors f    ON f.id = r.floor_id
+            JOIN anubhav_buildings b ON b.id = f.building_id
+            WHERE r.id = ?
+        `, [id]);
+        if (!room) {
+            return res.status(404).json({ success: false, message: 'Room not found' });
+        }
+        if (locScopeBlocked(req, room.place)) {
+            return res.status(403).json({
+                success: false,
+                message: 'LOC users may only act within their assigned place'
+            });
+        }
+
+        await runInTransaction([
+            ['DELETE FROM anubhav_allotments WHERE room_id = ?', [id]],
+            ['DELETE FROM anubhav_rooms WHERE id = ?', [id]],
+        ]);
+
+        res.json({
+            success: true,
+            message: 'Room deleted',
+            data: { id }
+        });
+    } catch (error) {
+        console.error('deleteRoom error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to delete room',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
 module.exports = {
     createBuilding,
     listBuildings,
     createFloor,
     createRoom,
+    deleteBuilding,
+    deleteFloor,
+    deleteRoom,
     getRoomingData,
     placeOfBuilding,
     placeOfFloor

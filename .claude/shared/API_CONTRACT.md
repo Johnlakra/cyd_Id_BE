@@ -51,6 +51,17 @@ POST  /anubhav/rooms                 { floor_id, name, capacity }
 POST  /anubhav/allotments            { room_id, registration_id }
 DELETE/anubhav/allotments/:id
 GET   /anubhav/rooming?place=&building_id?&floor_id?&room_id?  -> data shaped for PDF generation
+                                     // occupants now include photo_url (for on-screen Room Board avatars)
+
+DELETE/anubhav/buildings/:id         (admin or dexco only — LOC → 403)
+DELETE/anubhav/floors/:id            (admin or dexco only — LOC → 403)
+DELETE/anubhav/rooms/:id             (admin or dexco only — LOC → 403)
+      // Cascade order (no orphans, runs in a single DB transaction):
+      //   building → allotments under its rooms → rooms → floors → building
+      //   floor    → allotments under its rooms → rooms → floor
+      //   room     → allotments of the room → room
+      // Registrations and profile rows are NEVER touched — affected youth stay
+      // registered and simply become un-allotted.
 ```
 
 ## Timetable + Announcements (Phase 3)

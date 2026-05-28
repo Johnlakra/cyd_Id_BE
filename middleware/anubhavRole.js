@@ -47,6 +47,18 @@ const requireEventRole = (allowedRoles) => (req, res, next) => {
     next();
 };
 
+// Stricter guard for destructive accommodation routes: admin OR dexco only.
+// LOC must be rejected explicitly. Used by DELETE /anubhav/buildings|floors|rooms
+// to make the "no LOC deletes" contract obvious at the route definition.
+const requireAdminOrDexco = (req, res, next) => {
+    if (req.user.role === 'admin') return next();
+    if (req.user.event_role === 'dexco') return next();
+    return res.status(403).json({
+        success: false,
+        message: 'Admin or DEXCO access required'
+    });
+};
+
 // For place-scoped operations: extract `place` from body/query/params and ensure
 // the caller can act on it. Admin and DEXCO act on all three places; LOC only on loc_place.
 const requirePlaceAccess = (req, res, next) => {
@@ -74,5 +86,6 @@ module.exports = {
     isDeaneryInPlace,
     loadEventRole,
     requireEventRole,
+    requireAdminOrDexco,
     requirePlaceAccess
 };
