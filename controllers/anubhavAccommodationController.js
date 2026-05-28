@@ -97,30 +97,51 @@ const listBuildings = async (req, res) => {
         const floorIds = floors.map(f => f.id);
         let rooms = [];
         if (floorIds.length > 0) {
-            rooms = await query(`
+            const roomRows = await query(`
                 SELECT
-                    r.id, r.floor_id, r.name, r.capacity,
-                    COALESCE(a.occupancy, 0) AS occupancy
+                    r.id AS room_id, r.floor_id, r.name, r.capacity,
+                    a.id AS allotment_id,
+                    reg.id AS registration_id,
+                    p.name AS occupant_name,
+                    p.parish AS occupant_parish
                 FROM anubhav_rooms r
-                LEFT JOIN (
-                    SELECT room_id, COUNT(*) AS occupancy
-                    FROM anubhav_allotments
-                    GROUP BY room_id
-                ) a ON a.room_id = r.id
+                LEFT JOIN anubhav_allotments a ON a.room_id = r.id
+                LEFT JOIN anubhav_registrations reg ON reg.id = a.registration_id AND reg.status = 1
+                LEFT JOIN profile p ON p.id = reg.profile_id
                 WHERE r.floor_id IN (${floorIds.map(() => '?').join(',')})
-                ORDER BY r.name ASC
+                ORDER BY r.name ASC, p.name ASC
             `, floorIds);
+
+            const roomMap = {};
+            for (const row of roomRows) {
+                if (!roomMap[row.room_id]) {
+                    roomMap[row.room_id] = {
+                        id: row.room_id,
+                        floor_id: row.floor_id,
+                        name: row.name,
+                        capacity: Number(row.capacity),
+                        occupants: [],
+                    };
+                }
+                if (row.allotment_id && row.registration_id) {
+                    roomMap[row.room_id].occupants.push({
+                        allotment_id: row.allotment_id,
+                        registration_id: row.registration_id,
+                        name: row.occupant_name,
+                        parish: row.occupant_parish,
+                    });
+                }
+            }
+            rooms = Object.values(roomMap).map(r => ({
+                ...r,
+                occupancy: r.occupants.length,
+                vacant: Math.max(0, r.capacity - r.occupants.length),
+            }));
         }
 
-        // Reshape into nested structure.
+        // Reshape into nested structure with building-level totals.
         const roomsByFloor = rooms.reduce((acc, r) => {
-            (acc[r.floor_id] = acc[r.floor_id] || []).push({
-                id: r.id,
-                name: r.name,
-                capacity: r.capacity,
-                occupancy: Number(r.occupancy) || 0,
-                vacant: Math.max(0, r.capacity - (Number(r.occupancy) || 0))
-            });
+            (acc[r.floor_id] = acc[r.floor_id] || []).push(r);
             return acc;
         }, {});
         const floorsByBuilding = floors.reduce((acc, f) => {
@@ -128,16 +149,23 @@ const listBuildings = async (req, res) => {
                 id: f.id,
                 name: f.name,
                 level: f.level,
-                rooms: roomsByFloor[f.id] || []
+                rooms: roomsByFloor[f.id] || [],
             });
             return acc;
         }, {});
-        const nested = buildings.map(b => ({
-            id: b.id,
-            place: b.place,
-            name: b.name,
-            floors: floorsByBuilding[b.id] || []
-        }));
+        const nested = buildings.map(b => {
+            const bFloors = floorsByBuilding[b.id] || [];
+            const capacity = bFloors.reduce((s, f) => s + f.rooms.reduce((rs, r) => rs + r.capacity, 0), 0);
+            const occupancy = bFloors.reduce((s, f) => s + f.rooms.reduce((rs, r) => rs + r.occupancy, 0), 0);
+            return {
+                id: b.id,
+                place: b.place,
+                name: b.name,
+                capacity,
+                occupancy,
+                floors: bFloors,
+            };
+        });
 
         res.json({
             success: true,

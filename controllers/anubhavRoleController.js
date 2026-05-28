@@ -5,12 +5,13 @@ const { PLACES, EVENT_ROLES } = require('../middleware/anubhavRole');
 
 // GET /anubhav/me/role
 // Returns the caller's current event role (loaded by loadEventRole middleware).
+// Admin users are treated as dexco so the frontend unlocks all management views.
 const getMyRole = async (req, res) => {
     res.json({
         success: true,
         message: 'Event role retrieved',
         data: {
-            event_role: req.user.event_role,
+            event_role: req.user.role === 'admin' ? 'dexco' : req.user.event_role,
             loc_place: req.user.loc_place
         }
     });
@@ -205,9 +206,37 @@ const searchUsers = async (req, res) => {
     }
 };
 
+// GET /anubhav/deanery-parish-map
+// Returns all deaneries and their parishes sourced from the canonical DB tables.
+// Any authenticated user may call this; frontend filters to the relevant place.
+const getDeaneryParishMap = async (req, res) => {
+    try {
+        const rows = await query(`
+            SELECT d.name AS deanery_name, p.name AS parish_name
+            FROM parish p
+            JOIN deanery d ON p.deanery_id = d.id
+            ORDER BY d.name, p.name
+        `);
+        const map = {};
+        for (const { deanery_name, parish_name } of rows) {
+            if (!map[deanery_name]) map[deanery_name] = [];
+            map[deanery_name].push(parish_name);
+        }
+        res.json({ success: true, message: 'Deanery-parish map retrieved', data: map });
+    } catch (error) {
+        console.error('getDeaneryParishMap error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to load deanery-parish map',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
 module.exports = {
     getMyRole,
     grantRole,
     listRoles,
-    searchUsers
+    searchUsers,
+    getDeaneryParishMap
 };

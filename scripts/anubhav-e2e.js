@@ -64,11 +64,22 @@ async function run() {
   assert('GET /anubhav/me/role 200', meRole.status === 200, meRole.status);
   assert('has event_role', 'event_role' in (meRole.body.data || {}), JSON.stringify(meRole.body));
 
-  // ── 4. event-role gate (none → 403) ──────────────────────────────────────
+  // ── 3b. Deanery-parish map ────────────────────────────────────────────────
+  console.log('\n[3b] Deanery-parish map');
+  const dpMap = await get('/anubhav/deanery-parish-map', token);
+  assert('GET /anubhav/deanery-parish-map 200', dpMap.status === 200, dpMap.status);
+  const dpData = dpMap.body.data || {};
+  const deaneryCount = Object.keys(dpData).length;
+  assert('map is non-empty', deaneryCount > 0, 'deanery count=' + deaneryCount);
+  const parishCount = Object.values(dpData).reduce((s, arr) => s + arr.length, 0);
+  console.log('    Deaneries:', deaneryCount, '| Parishes:', parishCount);
+
+  // ── 4. event-role gate ────────────────────────────────────────────────────
+  // Admin bypasses requireEventRole regardless of their event_role value.
   console.log('\n[4] Event-role gate');
   await query('UPDATE users SET event_role=?, loc_place=NULL WHERE username=?', ['none', 'admin']);
   const gated = await get('/anubhav/eligible', token, 'place=phagwara');
-  assert('event_role=none → 403', gated.status === 403, gated.status + ': ' + gated.body?.message);
+  assert('admin with event_role=none → 200 (admin bypass)', gated.status === 200, gated.status + ': ' + gated.body?.message);
 
   // ── 5. Promote admin to dexco ──────────────────────────────────────────────
   console.log('\n[5] Promote admin → dexco via DB');
@@ -144,9 +155,10 @@ async function run() {
     const fees = await get('/anubhav/fees', token, 'place=phagwara');
     assert('GET /anubhav/fees 200', fees.status === 200, fees.status);
     const fd = fees.body.data || {};
-    assert('fees has placeTotal', 'placeTotal' in fd, JSON.stringify(fd).slice(0, 200));
-    assert('fees has overall', 'overall' in fd, JSON.stringify(fd).slice(0, 200));
-    assert('placeTotal.total = 50 × youth', Number(fd.placeTotal?.total) === 50 * Number(fd.placeTotal?.youth), JSON.stringify(fd.placeTotal));
+    assert('fees has placeTotal (number)', typeof fd.placeTotal === 'number', JSON.stringify(fd).slice(0, 200));
+    assert('fees has placeCount (number)', typeof fd.placeCount === 'number', JSON.stringify(fd).slice(0, 200));
+    assert('fees has overall (number)', typeof fd.overall === 'number', JSON.stringify(fd).slice(0, 200));
+    assert('placeCount × 50 = placeTotal', fd.placeTotal === 50 * fd.placeCount, `placeTotal=${fd.placeTotal} placeCount=${fd.placeCount}`);
   } else {
     console.log('  SKIP: no eligible profiles for phagwara (check deanery data)');
   }
@@ -190,21 +202,33 @@ async function run() {
   // Buildings list + rooming data
   const bldgList = await get('/anubhav/buildings', token, 'place=phagwara');
   assert('GET /anubhav/buildings 200', bldgList.status === 200, bldgList.status);
+  const bldgData = bldgList.body.data || {};
+  assert('buildings response has buildings array', Array.isArray(bldgData.buildings), JSON.stringify(bldgData).slice(0, 100));
+  if (Array.isArray(bldgData.buildings) && bldgData.buildings.length > 0) {
+    const b0 = bldgData.buildings[0];
+    assert('building has capacity+occupancy', typeof b0.capacity === 'number' && typeof b0.occupancy === 'number',
+      JSON.stringify(b0).slice(0, 100));
+    const firstRoom = b0.floors?.[0]?.rooms?.[0];
+    if (firstRoom) assert('room has occupants array', Array.isArray(firstRoom.occupants), JSON.stringify(firstRoom).slice(0, 100));
+  }
   const rooming = await get('/anubhav/rooming', token, 'place=phagwara');
   assert('GET /anubhav/rooming 200', rooming.status === 200, rooming.status);
 
   // ── 12. Timetable ──────────────────────────────────────────────────────────
   console.log('\n[12] Timetable');
   const tItem = await post('/anubhav/timetable', {
-    place: 'phagwara', day: '2026-07-10', start_time: '08:00', end_time: '09:00',
+    place: 'phagwara', day: 1, start_time: '08:00', end_time: '09:00',
     title: 'E2E Opening Prayer', location: 'Main Hall',
   }, token);
   assert('POST /anubhav/timetable 200/201', tItem.status === 200 || tItem.status === 201, tItem.status + ': ' + tItem.body?.message);
   const tId = tItem.body.data?.id || tItem.body.data?.item?.id;
+  assert('created item day is integer 1', tItem.body.data?.item?.day === 1, JSON.stringify(tItem.body.data?.item));
 
   const tList = await get('/anubhav/timetable', token, 'place=phagwara');
   assert('GET /anubhav/timetable 200', tList.status === 200, tList.status);
-  assert('timetable returns array', Array.isArray(tList.body.data?.items || tList.body.data), JSON.stringify(tList.body.data).slice(0, 80));
+  assert('timetable returns items array', Array.isArray(tList.body.data?.items), JSON.stringify(tList.body.data).slice(0, 80));
+  assert('timetable item day is integer', typeof tList.body.data?.items?.[0]?.day === 'number',
+    JSON.stringify(tList.body.data?.items?.[0]));
 
   const tLive = await get('/anubhav/timetable/live', token, 'place=phagwara');
   assert('GET /anubhav/timetable/live 200', tLive.status === 200, tLive.status);
@@ -213,7 +237,7 @@ async function run() {
 
   if (tId) {
     const tUpd = await put('/anubhav/timetable/' + tId, {
-      day: '2026-07-10', start_time: '08:00', end_time: '09:30', title: 'E2E Updated',
+      day: 1, start_time: '08:00', end_time: '09:30', title: 'E2E Updated',
     }, token);
     assert('PUT /anubhav/timetable/:id 200', tUpd.status === 200, tUpd.status + ': ' + tUpd.body?.message);
     const tDel = await del('/anubhav/timetable/' + tId, token);
@@ -248,6 +272,31 @@ async function run() {
 
   // ── 14. Phase 4 — Participant self-view + Role close ───────────────────────
   console.log('\n[14] Phase 4 — Participant self-view + Role close');
+
+  // Pre-clean: deactivate any stale E2E registrations/profiles left by a prior incomplete run
+  // so that 14b ("admin has no active registration") sees a clean slate.
+  {
+    const adminRow0 = await queryOne('SELECT id FROM users WHERE username = ?', ['admin']);
+    if (adminRow0) {
+      const staleAdminProf = await queryOne('SELECT id FROM profile WHERE profile_user_id = ?', [adminRow0.id]);
+      if (staleAdminProf) {
+        await query(`DELETE a FROM anubhav_allotments a
+          JOIN anubhav_registrations r ON r.id = a.registration_id
+          WHERE r.profile_id = ?`, [staleAdminProf.id]);
+        await query('UPDATE anubhav_registrations SET status=0 WHERE profile_id=?', [staleAdminProf.id]);
+        await query('UPDATE profile SET status=0 WHERE id=?', [staleAdminProf.id]);
+      }
+    }
+    const staleRoommate = await queryOne(
+      "SELECT id FROM profile WHERE phone='8888888888' AND name='E2E Roommate'");
+    if (staleRoommate) {
+      await query(`DELETE a FROM anubhav_allotments a
+        JOIN anubhav_registrations r ON r.id = a.registration_id
+        WHERE r.profile_id = ?`, [staleRoommate.id]);
+      await query('UPDATE anubhav_registrations SET status=0 WHERE profile_id=?', [staleRoommate.id]);
+      await query('UPDATE profile SET status=0 WHERE id=?', [staleRoommate.id]);
+    }
+  }
 
   // 14a. No token → 401
   const noTokenMyEvent = await get('/anubhav/my/event', null);
@@ -296,10 +345,11 @@ async function run() {
     let adminProfileId = null;
     let createdAdminProfile = false;
     const existingAdminProfile = await queryOne(
-      'SELECT id FROM profile WHERE profile_user_id = ? AND status = 1', [adminRow.id]
+      'SELECT id FROM profile WHERE profile_user_id = ?', [adminRow.id]
     );
     if (existingAdminProfile) {
       adminProfileId = existingAdminProfile.id;
+      await query('UPDATE profile SET status=1 WHERE id=?', [adminProfileId]);
     } else {
       const pRes = await query(
         `INSERT INTO profile
@@ -342,26 +392,50 @@ async function run() {
       adminAllotId = existingAdminAllot.id;
     }
 
-    // Create a roommate (profile without a user login) and allot to same room
-    const rpRes = await query(
-      `INSERT INTO profile
-         (name, father, mother, dob, designation, level, date_of_baptism,
-          postal_address, parish, deanery, qualification, phone, involvement,
-          photo_url, issue_date, status, created_by, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, NOW())`,
-      ['E2E Roommate', 'E2E Father', 'E2E Mother', '2005-01-01',
-       'Youth', 'YCS', '2010-01-01', 'E2E Address', 'Roommate Parish',
-       'Hoshiarpur', 'Graduate', '8888888888', 'None', 'placeholder.jpg',
-       '2026-01-01', adminRow.id]
+    // Create a roommate (profile without a user login) and allot to same room.
+    // Reuse soft-deleted row from a prior run if it exists (avoid UNIQUE_PHONE_DOB conflict).
+    let roommateProfileId;
+    const existingRoommate = await queryOne(
+      "SELECT id FROM profile WHERE phone = '8888888888' AND name = 'E2E Roommate'"
     );
-    const roommateProfileId = rpRes.insertId;
-    const rrRes = await query(
-      `INSERT INTO anubhav_registrations (place, profile_id, fee_amount, status, created_by) VALUES (?, ?, 50, 1, ?)`,
-      ['phagwara', roommateProfileId, adminRow.id]
-    );
-    const roommateRegId = rrRes.insertId;
-    const raRes = await query('INSERT INTO anubhav_allotments (room_id, registration_id) VALUES (?, ?)', [roomId, roommateRegId]);
-    const roommateAllotId = raRes.insertId;
+    if (existingRoommate) {
+      roommateProfileId = existingRoommate.id;
+      await query('UPDATE profile SET status=1 WHERE id=?', [roommateProfileId]);
+    } else {
+      const rpRes = await query(
+        `INSERT INTO profile
+           (name, father, mother, dob, designation, level, date_of_baptism,
+            postal_address, parish, deanery, qualification, phone, involvement,
+            photo_url, issue_date, status, created_by, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, NOW())`,
+        ['E2E Roommate', 'E2E Father', 'E2E Mother', '2005-01-01',
+         'Youth', 'YCS', '2010-01-01', 'E2E Address', 'Roommate Parish',
+         'Hoshiarpur', 'Graduate', '8888888888', 'None', 'placeholder.jpg',
+         '2026-01-01', adminRow.id]
+      );
+      roommateProfileId = rpRes.insertId;
+    }
+    const existingRoommateReg = await queryOne(
+      'SELECT id FROM anubhav_registrations WHERE profile_id=? AND place=?', [roommateProfileId, 'phagwara']);
+    let roommateRegId;
+    if (existingRoommateReg) {
+      roommateRegId = existingRoommateReg.id;
+      await query('UPDATE anubhav_registrations SET status=1 WHERE id=?', [roommateRegId]);
+    } else {
+      const rrRes = await query(
+        `INSERT INTO anubhav_registrations (place, profile_id, fee_amount, status, created_by) VALUES (?, ?, 50, 1, ?)`,
+        ['phagwara', roommateProfileId, adminRow.id]
+      );
+      roommateRegId = rrRes.insertId;
+    }
+    const existingRoommateAllot = await queryOne('SELECT id FROM anubhav_allotments WHERE registration_id=?', [roommateRegId]);
+    let roommateAllotId;
+    if (existingRoommateAllot) {
+      roommateAllotId = existingRoommateAllot.id;
+    } else {
+      const raRes = await query('INSERT INTO anubhav_allotments (room_id, registration_id) VALUES (?, ?)', [roomId, roommateRegId]);
+      roommateAllotId = raRes.insertId;
+    }
 
     // Call GET /anubhav/my/event as admin (whose profile is now registered + allotted)
     const myEventAllotted = await get('/anubhav/my/event', token);

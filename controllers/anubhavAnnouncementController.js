@@ -19,7 +19,7 @@ const createAnnouncement = async (req, res) => {
         }
 
         if (place === null || typeof place === 'undefined') {
-            if (req.user.event_role !== 'dexco') {
+            if (req.user.role !== 'admin' && req.user.event_role !== 'dexco') {
                 return res.status(403).json({
                     success: false,
                     message: 'Only DEXCO may post diocese-wide announcements'
@@ -118,7 +118,7 @@ const deleteAnnouncement = async (req, res) => {
 
         // Diocese-wide entries (place IS NULL) are DEXCO-only to remove.
         if (existing.place === null) {
-            if (req.user.event_role !== 'dexco') {
+            if (req.user.role !== 'admin' && req.user.event_role !== 'dexco') {
                 return res.status(403).json({
                     success: false,
                     message: 'Only DEXCO may remove diocese-wide announcements'

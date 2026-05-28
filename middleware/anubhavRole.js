@@ -35,7 +35,9 @@ const loadEventRole = async (req, res, next) => {
 
 // Require the caller to hold one of the listed event roles.
 // Usage: requireEventRole(['dexco']) or requireEventRole(['dexco', 'loc']).
+// Admin users bypass this check — they have full access.
 const requireEventRole = (allowedRoles) => (req, res, next) => {
+    if (req.user.role === 'admin') return next();
     if (!allowedRoles.includes(req.user.event_role)) {
         return res.status(403).json({
             success: false,
@@ -46,7 +48,7 @@ const requireEventRole = (allowedRoles) => (req, res, next) => {
 };
 
 // For place-scoped operations: extract `place` from body/query/params and ensure
-// the caller can act on it. DEXCO acts on all three places; LOC only on loc_place.
+// the caller can act on it. Admin and DEXCO act on all three places; LOC only on loc_place.
 const requirePlaceAccess = (req, res, next) => {
     const place = req.body.place || req.query.place || req.params.place;
     if (!place || !PLACES.includes(place)) {
@@ -55,7 +57,7 @@ const requirePlaceAccess = (req, res, next) => {
             message: `place must be one of: ${PLACES.join(', ')}`
         });
     }
-    if (req.user.event_role === 'loc' && req.user.loc_place !== place) {
+    if (req.user.role !== 'admin' && req.user.event_role === 'loc' && req.user.loc_place !== place) {
         return res.status(403).json({
             success: false,
             message: 'LOC users may only act on their assigned place'

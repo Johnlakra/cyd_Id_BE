@@ -310,7 +310,7 @@ const getFees = async (req, res) => {
         const place = req.place;
 
         const byParish = await query(`
-            SELECT p.deanery, p.parish, COUNT(*) AS youth, SUM(r.fee_amount) AS total
+            SELECT p.deanery, p.parish, COUNT(*) AS count, SUM(r.fee_amount) AS total
             FROM anubhav_registrations r
             JOIN profile p ON p.id = r.profile_id
             WHERE r.place = ? AND r.status = 1
@@ -319,7 +319,7 @@ const getFees = async (req, res) => {
         `, [place]);
 
         const byDeanery = await query(`
-            SELECT p.deanery, COUNT(*) AS youth, SUM(r.fee_amount) AS total
+            SELECT p.deanery, COUNT(*) AS count, SUM(r.fee_amount) AS total
             FROM anubhav_registrations r
             JOIN profile p ON p.id = r.profile_id
             WHERE r.place = ? AND r.status = 1
@@ -345,8 +345,10 @@ const getFees = async (req, res) => {
                 perYouth: PER_YOUTH_FEE,
                 byParish,
                 byDeanery,
-                placeTotal: { youth: placeTotalRow.youth, total: placeTotalRow.total },
-                overall: { youth: overallRow.youth, total: overallRow.total }
+                placeTotal: Number(placeTotalRow.total),
+                placeCount: Number(placeTotalRow.youth),
+                overall: Number(overallRow.total),
+                overallCount: Number(overallRow.youth),
             }
         });
     } catch (error) {

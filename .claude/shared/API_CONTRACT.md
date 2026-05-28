@@ -21,6 +21,16 @@ GET   /anubhav/users/search?q=               (admin) -> search profiles by name/
                              // user_id=null means no login account; cannot be promoted
 ```
 
+## Lookup tables (sourced from canonical DB tables)
+```
+GET   /anubhav/deanery-parish-map           (any authenticated user)
+      -> { success, data: { "<deaneryName>": ["<parishName>", ...] } }
+      // Returns ALL 16 deaneries and their parishes from the `deanery`/`parish` DB tables.
+      // parish.deanery_id is an integer FK → deanery.id.
+      // Frontend filters the map client-side to only the deaneries for the selected place.
+      // PLACE_DEANERIES in middleware/anubhavRole.js is the authoritative place→deanery mapping.
+```
+
 ## Registration (Phase 1)
 ```
 GET   /anubhav/eligible?place=&deanery=&parish=&search=   -> profiles eligible for that place
@@ -29,7 +39,7 @@ GET   /anubhav/registrations?place=&deanery=&parish=      -> registered youth + 
 DELETE/anubhav/registrations/:id
 GET   /anubhav/chaperones?place=&parish=                  -> chaperones for a parish group
 POST  /anubhav/chaperones            { place, parish, name, phone, type }  // Sister | Catechist
-GET   /anubhav/fees?place=           -> { perYouth:50, byParish:[], byDeanery:[], placeTotal, overall }
+GET   /anubhav/fees?place=           -> { perYouth:50, byParish:[{deanery,parish,count,total}], byDeanery:[{deanery,count,total}], placeTotal:number, placeCount:number, overall:number, overallCount:number }
 ```
 
 ## Accommodation (Phase 2)

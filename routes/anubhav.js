@@ -28,6 +28,11 @@ router.use(authenticateToken, loadEventRole);
 // @access  Authenticated
 router.get('/me/role', roleController.getMyRole);
 
+// @route   GET /anubhav/deanery-parish-map
+// @desc    Full map of deaneries → parishes from canonical DB tables (frontend filters by place)
+// @access  Authenticated (any logged-in user)
+router.get('/deanery-parish-map', roleController.getDeaneryParishMap);
+
 // @route   GET /anubhav/my/event
 // @desc    Participant self-view: registration, room+roommates, timetable, live, announcements.
 //          Self-scoped (resolved from req.user.id) — no place param, no role gate.
