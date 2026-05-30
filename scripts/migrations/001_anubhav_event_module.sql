@@ -4,9 +4,11 @@
 -- Safe to run once on the existing cyd database. Run on the feature branch's DB first.
 
 -- 1) Extend users with event capabilities (no new login accounts).
+-- MySQL (unlike MariaDB) does not support ADD COLUMN IF NOT EXISTS; the runner
+-- ignores duplicate-column errors instead, keeping re-runs idempotent.
 ALTER TABLE users
-  ADD COLUMN IF NOT EXISTS event_role ENUM('none','loc','dexco') NOT NULL DEFAULT 'none',
-  ADD COLUMN IF NOT EXISTS loc_place  VARCHAR(32) NULL;
+  ADD COLUMN event_role ENUM('none','loc','dexco') NOT NULL DEFAULT 'none',
+  ADD COLUMN loc_place  VARCHAR(32) NULL;
 
 -- 2) Place is a fixed enum used everywhere: 'phagwara' | 'abohar' | 'amritsar'.
 
@@ -32,7 +34,8 @@ CREATE TABLE IF NOT EXISTS anubhav_registrations (
   created_by INT,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   UNIQUE KEY uniq_place_profile (place, profile_id),
-  FOREIGN KEY (profile_id) REFERENCES profile(id),
+  -- No FK on profile_id: `profile` is MyISAM (no FK support) and prod may lack
+  -- ALTER privileges to convert it. Integrity is enforced in app code instead.
   FOREIGN KEY (chaperone_id) REFERENCES anubhav_chaperones(id),
   FOREIGN KEY (created_by) REFERENCES users(id)
 );

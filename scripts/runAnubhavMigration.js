@@ -9,20 +9,40 @@ const fs = require('fs');
 const path = require('path');
 const { query, testConnection } = require('../config/database');
 
-// Applied in order. Additive migrations only — each is independently idempotent.
-const MIGRATION_FILES = [
-    path.join(__dirname, 'migrations', '001_anubhav_event_module.sql'),
-    path.join(__dirname, 'migrations', '002_anubhav_speakers.sql'),
-];
+const MIGRATIONS_DIR = path.join(__dirname, 'migrations');
+
+// All .sql migration files, applied in filename order (001, 002, ...). Each file
+// is idempotent (CREATE TABLE IF NOT EXISTS + already-exists errno skipping), so
+// re-running the whole set is safe.
+const MIGRATION_FILES = fs
+    .readdirSync(MIGRATIONS_DIR)
+    .filter(f => f.endsWith('.sql'))
+    .sort()
+    .map(f => path.join(MIGRATIONS_DIR, f));
+
+// MySQL error numbers that mean "this object already exists" — safe to skip so
+// the migration stays idempotent on re-run (MySQL lacks ADD COLUMN IF NOT EXISTS).
+const ALREADY_EXISTS_ERRNOS = new Set([
+    1050, // ER_TABLE_EXISTS_ERROR
+    1060, // ER_DUP_FIELDNAME (column already added)
+    1061, // ER_DUP_KEYNAME (index already added)
+    1826, // ER_FK_DUP_NAME (foreign key already added)
+]);
 
 // Split a SQL file into individual statements. Naive split on `;\n` is sufficient
 // here because the migration contains no triggers, procedures, or string literals
-// with semicolons.
+// with semicolons. Full-line `--` comments are stripped from each chunk so a
+// statement preceded by a comment line is not mistaken for a comment-only chunk
+// (inline trailing comments are kept — MySQL executes them fine).
 const splitStatements = (sql) => {
     return sql
         .split(/;\s*\n/)
-        .map(s => s.trim())
-        .filter(s => s.length > 0 && !/^--/.test(s));
+        .map(s => s
+            .split('\n')
+            .filter(line => !/^\s*--/.test(line))
+            .join('\n')
+            .trim())
+        .filter(s => s.length > 0);
 };
 
 const main = async () => {
@@ -43,7 +63,15 @@ const main = async () => {
             const stmt = statements[i];
             const preview = stmt.split('\n')[0].slice(0, 80);
             console.log(`  [${i + 1}/${statements.length}] ${preview}...`);
-            await query(stmt);
+            try {
+                await query(stmt);
+            } catch (err) {
+                if (ALREADY_EXISTS_ERRNOS.has(err.errno)) {
+                    console.log(`      ↳ already applied (${err.code}), skipping`);
+                } else {
+                    throw err;
+                }
+            }
         }
     }
 
