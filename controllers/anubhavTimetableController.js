@@ -3,37 +3,10 @@
 // Mutations are restricted to LOC/DEXCO. Reads are open to any authenticated user
 // (every youth must see their place's schedule).
 const { query, queryOne } = require('../config/database');
+const { resolveDay, dateToDay } = require('../utils/anubhavDay');
 
 const locScopeBlocked = (req, place) =>
     req.user.event_role === 'loc' && req.user.loc_place !== place;
-
-// Each place's retreat starts on a fixed date; day 1-3 maps to start+0, +1, +2.
-const PLACE_START_DATES = {
-    phagwara: '2026-06-02',
-    abohar:   '2026-06-04',
-    amritsar: '2026-06-06',
-};
-
-// Accepts integer 1-3 or YYYY-MM-DD string. Returns YYYY-MM-DD for DB storage.
-const resolveDay = (place, day) => {
-    const n = Number(day);
-    if (Number.isInteger(n) && n >= 1 && n <= 3) {
-        const start = new Date(PLACE_START_DATES[place] || PLACE_START_DATES.phagwara);
-        start.setUTCDate(start.getUTCDate() + n - 1);
-        return start.toISOString().slice(0, 10);
-    }
-    return String(day);
-};
-
-// Converts a stored YYYY-MM-DD date back to day number 1-3 (or 0 if out of range).
-const dateToDay = (place, dateStr) => {
-    const start = PLACE_START_DATES[place];
-    if (!start || !dateStr) return 0;
-    const diff = Math.round(
-        (new Date(dateStr) - new Date(start)) / (1000 * 60 * 60 * 24)
-    ) + 1;
-    return diff >= 1 && diff <= 3 ? diff : 0;
-};
 
 // Lightweight body validators shared by POST and PUT.
 const validateTimetableBody = ({ day, start_time, title, end_time }) => {

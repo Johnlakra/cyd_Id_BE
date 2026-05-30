@@ -1,7 +1,7 @@
 // scripts/runAnubhavMigration.js - Apply the Anubhav 2026 additive schema.
-// Reads scripts/migrations/001_anubhav_event_module.sql and runs each statement
-// against the configured MySQL database. Idempotent: all statements use
-// IF NOT EXISTS, so re-running is safe.
+// Reads the migration SQL files under scripts/migrations/ and runs each statement
+// against the configured MySQL database, in filename order. Idempotent: all
+// statements use IF NOT EXISTS, so re-running is safe.
 //
 // Usage: node scripts/runAnubhavMigration.js
 require('dotenv').config();
@@ -9,7 +9,11 @@ const fs = require('fs');
 const path = require('path');
 const { query, testConnection } = require('../config/database');
 
-const MIGRATION_FILE = path.join(__dirname, 'migrations', '001_anubhav_event_module.sql');
+// Applied in order. Additive migrations only — each is independently idempotent.
+const MIGRATION_FILES = [
+    path.join(__dirname, 'migrations', '001_anubhav_event_module.sql'),
+    path.join(__dirname, 'migrations', '002_anubhav_speakers.sql'),
+];
 
 // Split a SQL file into individual statements. Naive split on `;\n` is sufficient
 // here because the migration contains no triggers, procedures, or string literals
@@ -29,16 +33,18 @@ const main = async () => {
         throw new Error('Database connection failed.');
     }
 
-    const sql = fs.readFileSync(MIGRATION_FILE, 'utf8');
-    const statements = splitStatements(sql);
+    for (const migrationFile of MIGRATION_FILES) {
+        const sql = fs.readFileSync(migrationFile, 'utf8');
+        const statements = splitStatements(sql);
 
-    console.log(`📋 Applying ${statements.length} statements from ${path.basename(MIGRATION_FILE)}`);
+        console.log(`📋 Applying ${statements.length} statements from ${path.basename(migrationFile)}`);
 
-    for (let i = 0; i < statements.length; i++) {
-        const stmt = statements[i];
-        const preview = stmt.split('\n')[0].slice(0, 80);
-        console.log(`  [${i + 1}/${statements.length}] ${preview}...`);
-        await query(stmt);
+        for (let i = 0; i < statements.length; i++) {
+            const stmt = statements[i];
+            const preview = stmt.split('\n')[0].slice(0, 80);
+            console.log(`  [${i + 1}/${statements.length}] ${preview}...`);
+            await query(stmt);
+        }
     }
 
     console.log('✅ Migration complete.');

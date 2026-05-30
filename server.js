@@ -11,12 +11,18 @@ const authRoutes = require('./routes/auth');
 const profileRoutes = require('./routes/profile');
 const profileHolderRoutes = require('./routes/profileHolder');
 const anubhavRoutes = require('./routes/anubhav');
+const anubhavPublicRoutes = require('./routes/anubhavPublic');
 
 // Initialize Express app
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 // Middleware
+// CORS: kept permissive (wide-open) to preserve the existing deployed app's behavior.
+// The new public website routes are read-only and expose no PII, so an open CORS
+// policy is safe for them. To tighten later, set ANUBHAV_ALLOWED_ORIGINS (comma-
+// separated) and switch to an allow-list — but only after confirming the existing
+// app's deployed origin is included, or the operational app will break.
 app.use(cors());
 app.use(express.json({ limit: '10mb' })); // Increased limit for base64 images
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
@@ -45,6 +51,9 @@ app.get('/health', (req, res) => {
 app.use('/auth', authRoutes);
 app.use('/profiles', profileRoutes);
 app.use('/profile-holder', profileHolderRoutes);
+// Public (no-auth) Anubhav website routes. Mounted BEFORE the authenticated
+// /anubhav router so /anubhav/public/* is served without authenticateToken.
+app.use('/anubhav/public', anubhavPublicRoutes);
 app.use('/anubhav', anubhavRoutes);
 
 // Handle 404 routes

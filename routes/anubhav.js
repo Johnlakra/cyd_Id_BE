@@ -15,6 +15,7 @@ const allotmentController = require('../controllers/anubhavAllotmentController')
 const timetableController = require('../controllers/anubhavTimetableController');
 const announcementController = require('../controllers/anubhavAnnouncementController');
 const participantController = require('../controllers/anubhavParticipantController');
+const speakerController = require('../controllers/anubhavSpeakerController');
 
 // Phase 1 endpoints all require an event role (LOC or DEXCO) and a valid place.
 // requirePlaceAccess additionally enforces LOC -> loc_place scoping.
@@ -143,5 +144,13 @@ router.delete('/timetable/:id',   requireEventRole(['loc', 'dexco']),  timetable
 router.get('/announcements',  announcementController.listAnnouncements);
 router.post('/announcements',     requireEventRole(['loc', 'dexco']),  announcementController.createAnnouncement);
 router.delete('/announcements/:id', requireEventRole(['loc', 'dexco']), announcementController.deleteAnnouncement);
+
+// ---------- Speaker management (admin + dexco only — LOC → 403) ----------
+// Public reads of published speakers live at GET /anubhav/public/speakers (no auth).
+// These authenticated CRUD routes manage the catalogue, including unpublished drafts.
+router.get('/speakers',         requireAdminOrDexco, speakerController.listSpeakers);
+router.post('/speakers',        requireAdminOrDexco, speakerController.createSpeaker);
+router.put('/speakers/:id',     requireAdminOrDexco, speakerController.updateSpeaker);
+router.delete('/speakers/:id',  requireAdminOrDexco, speakerController.deleteSpeaker);
 
 module.exports = router;
