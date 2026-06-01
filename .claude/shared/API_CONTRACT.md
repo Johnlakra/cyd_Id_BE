@@ -161,6 +161,58 @@ path — it clears `loc_place` to `null`. No separate deassign endpoint is neede
   ID-card-required fields: name, father_name (col `father`), deanery, parish,
   date_of_birth (col `dob`), phone, postal_address, level, designation, photo_url.
 
+## Public website (NO auth)
+Mounted at `/anubhav/public`. **No `authenticateToken`** on any route here — these
+power the public marketing/info website. Strict privacy boundary: counts and
+non-personal data only. **Never** returns youth name/phone/photo/address/email,
+`created_by`, registration rows, or roommate data. A light per-IP rate limiter guards
+against scraping (tunable via `ANUBHAV_PUBLIC_RATE_MAX` / `ANUBHAV_PUBLIC_RATE_WINDOW_MS`;
+defaults 120 req / 60s). The authenticated `/me` page on the website reuses the existing
+`GET /anubhav/my/event` endpoint with the same JWT — no new auth code.
+
+```
+GET /anubhav/public/event-summary
+    -> { event, perYouthFee:50, places:[{ place, venue, dates:[...], deaneries:[...] }] }
+       // Venues/dates/deanery groups for the 3 places (codified in constants/anubhavEvent.js).
+
+GET /anubhav/public/announcements?place=
+    -> { place, announcements:[{ title, body, place, created_at }], count }
+       // status=1, ordered created_at DESC, INCLUDING diocese-wide (place IS NULL).
+       // place is optional; omitted = all active announcements. NEVER created_by.
+
+GET /anubhav/public/announcements/latest
+    -> { announcement: { title, body, place, created_at } | null }
+       // Single most recent active announcement.
+
+GET /anubhav/public/timetable?place=     (place REQUIRED)
+    -> { place, items:[{ day, start_time, end_time, title, location, notes }], count }
+       // Ordered by day/start_time. NO created_by. day is integer 1-3 (or date string).
+
+GET /anubhav/public/stats
+    -> { byPlace:[{ place, registered, allotted }], totals:{ registered, allotted }, perYouthFee:50 }
+       // COUNTS ONLY from anubhav_registrations (status=1) + anubhav_allotments.
+       // Never name/phone/photo or any row data.
+
+GET /anubhav/public/speakers?place=
+    -> { place, speakers:[{ name, role, bio, photo_url, place }], count }
+       // status=1 only, ordered by sort_order then name. place optional;
+       // NULL-place speakers always appear. Speakers are presenters, not youth (no PII concern).
+```
+
+## Speaker management (admin + dexco only — LOC → 403)
+Authenticated CRUD on the speaker catalogue, mounted in the existing `/anubhav` router.
+Gated by `requireAdminOrDexco` (admin or dexco; LOC rejected with 403). Public reads of
+published speakers use `GET /anubhav/public/speakers` above.
+```
+POST   /anubhav/speakers       { place?, name, role, bio, photo_url, sort_order }
+       -> { speaker }   // status defaults to 1 (published)
+GET    /anubhav/speakers       -> { speakers:[...full rows...], count }
+       // Full list INCLUDING drafts (status=0).
+PUT    /anubhav/speakers/:id   { place?, name?, role?, bio?, photo_url?, sort_order?, status? }
+       -> { speaker }   // partial update; status 0/1 toggles publish state
+DELETE /anubhav/speakers/:id   -> soft delete (status=0)
+```
+
 ## Notes for the frontend session
 - All list endpoints already return counts where useful; do fee math display only,
   never recompute authoritative totals client-side.

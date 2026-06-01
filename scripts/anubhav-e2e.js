@@ -590,6 +590,125 @@ async function run() {
   assert('DELETE /anubhav/floors/:id 404 on missing',    del404Floor.status === 404, del404Floor.status);
   assert('DELETE /anubhav/rooms/:id 404 on missing',     del404Room.status  === 404, del404Room.status);
 
+  // ── 16. PUBLIC website endpoints (NO auth) ─────────────────────────────────
+  // All six /anubhav/public/* routes must return 200 WITHOUT a token and must
+  // never leak youth PII (name/phone/photo/email/address) or created_by.
+  console.log('\n[16] Public website endpoints (no-auth)');
+
+  // Restore admin → dexco so we can seed an announcement the public route will read.
+  await query('UPDATE users SET event_role=?,loc_place=NULL WHERE username=?', ['dexco', 'admin']);
+  const seedAnn = await post('/anubhav/announcements',
+    { place: 'phagwara', title: 'E2E Public Announce', body: 'Visible to public site' }, token);
+  const seedAnnId = seedAnn.body.data?.id || seedAnn.body.data?.announcement?.id;
+
+  // 16a. event-summary — 200 without token, has places + perYouthFee.
+  const pubSummary = await get('/anubhav/public/event-summary', null);
+  assert('GET /anubhav/public/event-summary 200 (no token)', pubSummary.status === 200, pubSummary.status);
+  assert('event-summary has places array', Array.isArray(pubSummary.body.data?.places), JSON.stringify(pubSummary.body.data).slice(0, 120));
+  assert('event-summary perYouthFee = 50', pubSummary.body.data?.perYouthFee === 50, JSON.stringify(pubSummary.body.data?.perYouthFee));
+  assert('event-summary has 3 places', (pubSummary.body.data?.places || []).length === 3, (pubSummary.body.data?.places || []).length);
+  assert('event-summary place has deaneries', Array.isArray(pubSummary.body.data?.places?.[0]?.deaneries), JSON.stringify(pubSummary.body.data?.places?.[0]));
+
+  // 16b. announcements — 200 without token; no created_by anywhere.
+  const pubAnn = await get('/anubhav/public/announcements', null, 'place=phagwara');
+  assert('GET /anubhav/public/announcements 200 (no token)', pubAnn.status === 200, pubAnn.status);
+  const pubAnnList = pubAnn.body.data?.announcements || [];
+  assert('public announcements non-empty', pubAnnList.length >= 1, 'count=' + pubAnnList.length);
+  assert('public announcements have NO created_by key', !pubAnnList.some(a => 'created_by' in a), JSON.stringify(pubAnnList[0] || {}));
+
+  // 16c. announcements/latest — 200 without token; no created_by.
+  const pubLatest = await get('/anubhav/public/announcements/latest', null);
+  assert('GET /anubhav/public/announcements/latest 200 (no token)', pubLatest.status === 200, pubLatest.status);
+  assert('latest announcement has no created_by', !pubLatest.body.data?.announcement || !('created_by' in pubLatest.body.data.announcement), JSON.stringify(pubLatest.body.data?.announcement || {}));
+
+  // 16d. timetable — 200 without token; no created_by.
+  const pubTt = await get('/anubhav/public/timetable', null, 'place=phagwara');
+  assert('GET /anubhav/public/timetable 200 (no token)', pubTt.status === 200, pubTt.status);
+  const pubTtItems = pubTt.body.data?.items || [];
+  assert('public timetable items have no created_by', !pubTtItems.some(i => 'created_by' in i), JSON.stringify(pubTtItems[0] || {}));
+
+  // 16e. stats — 200 without token; counts only; NO PII anywhere in payload.
+  const pubStats = await get('/anubhav/public/stats', null);
+  assert('GET /anubhav/public/stats 200 (no token)', pubStats.status === 200, pubStats.status);
+  assert('stats has byPlace array', Array.isArray(pubStats.body.data?.byPlace), JSON.stringify(pubStats.body.data).slice(0, 120));
+  assert('stats has totals.registered (number)', typeof pubStats.body.data?.totals?.registered === 'number', JSON.stringify(pubStats.body.data?.totals));
+  assert('stats has totals.allotted (number)', typeof pubStats.body.data?.totals?.allotted === 'number', JSON.stringify(pubStats.body.data?.totals));
+  assert('stats perYouthFee = 50', pubStats.body.data?.perYouthFee === 50, JSON.stringify(pubStats.body.data?.perYouthFee));
+
+  // 16f. speakers (public) — 200 without token.
+  const pubSpeakers = await get('/anubhav/public/speakers', null);
+  assert('GET /anubhav/public/speakers 200 (no token)', pubSpeakers.status === 200, pubSpeakers.status);
+  assert('public speakers returns array', Array.isArray(pubSpeakers.body.data?.speakers), JSON.stringify(pubSpeakers.body.data).slice(0, 120));
+
+  // 16g. NO-PII grep assertion: serialize every public payload and assert no PII
+  // keys/values appear. Stats especially must be counts-only.
+  const piiKeyRe = /"(phone|email|father|mother|dob|postal_address|profile_id|profile_user_id|chaperone_id|registration_id)"\s*:/i;
+  const piiValRe = /(9999999999|8888888888|9876543210|E2E Roommate|E2E Admin Youth)/;
+  for (const [label, resp] of [
+    ['event-summary', pubSummary], ['announcements', pubAnn], ['announcements/latest', pubLatest],
+    ['timetable', pubTt], ['stats', pubStats], ['speakers', pubSpeakers],
+  ]) {
+    const serialized = JSON.stringify(resp.body);
+    assert('public ' + label + ': no PII keys', !piiKeyRe.test(serialized), serialized.slice(0, 200));
+    assert('public ' + label + ': no PII values', !piiValRe.test(serialized), serialized.slice(0, 200));
+  }
+  // Stats must additionally contain no name/photo keys at all.
+  const statsSerialized = JSON.stringify(pubStats.body);
+  assert('stats: no name key', !/"name"\s*:/i.test(statsSerialized), statsSerialized.slice(0, 200));
+  assert('stats: no photo key', !/"photo(_url)?"\s*:/i.test(statsSerialized), statsSerialized.slice(0, 200));
+
+  if (seedAnnId) await del('/anubhav/announcements/' + seedAnnId, token);
+
+  // ── 17. Speaker CRUD auth gating (admin/dexco allowed; LOC → 403) ──────────
+  console.log('\n[17] Speaker CRUD (admin/dexco only — LOC 403)');
+
+  // 17a. No token → 401 on the management list.
+  const spkNoAuth = await get('/anubhav/speakers', null);
+  assert('GET /anubhav/speakers no token → 401', spkNoAuth.status === 401, spkNoAuth.status);
+
+  // 17b. DEXCO can create. (admin currently event_role=dexco)
+  const spkCreate = await post('/anubhav/speakers',
+    { place: 'phagwara', name: 'E2E Speaker', role: 'Keynote', bio: 'Bio', sort_order: 1 }, token);
+  assert('DEXCO POST /anubhav/speakers 200/201', spkCreate.status === 200 || spkCreate.status === 201, spkCreate.status + ': ' + spkCreate.body?.message);
+  const spkId = spkCreate.body.data?.id || spkCreate.body.data?.speaker?.id;
+  assert('created speaker id present', !!spkId, JSON.stringify(spkCreate.body.data));
+
+  // 17c. DEXCO management list includes drafts (full list).
+  const spkList = await get('/anubhav/speakers', token);
+  assert('DEXCO GET /anubhav/speakers 200', spkList.status === 200, spkList.status);
+  assert('speakers management list is array', Array.isArray(spkList.body.data?.speakers), JSON.stringify(spkList.body.data).slice(0, 120));
+
+  // 17d. DEXCO can update.
+  if (spkId) {
+    const spkUpd = await put('/anubhav/speakers/' + spkId, { name: 'E2E Speaker Updated', sort_order: 2 }, token);
+    assert('DEXCO PUT /anubhav/speakers/:id 200', spkUpd.status === 200, spkUpd.status + ': ' + spkUpd.body?.message);
+    assert('speaker name updated', spkUpd.body.data?.speaker?.name === 'E2E Speaker Updated', JSON.stringify(spkUpd.body.data?.speaker));
+  }
+
+  // 17e. LOC → 403 on all CRUD. Downgrade admin to a LOC user (role re-read per request).
+  await query("UPDATE users SET role='user', event_role='loc', loc_place='phagwara' WHERE username='admin'");
+  const locSpkList   = await get('/anubhav/speakers', token);
+  const locSpkCreate = await post('/anubhav/speakers', { name: 'LOC Speaker' }, token);
+  const locSpkUpd    = await put('/anubhav/speakers/' + (spkId || 1), { name: 'LOC edit' }, token);
+  const locSpkDel    = await del('/anubhav/speakers/' + (spkId || 1), token);
+  assert('LOC GET /anubhav/speakers 403',    locSpkList.status   === 403, locSpkList.status);
+  assert('LOC POST /anubhav/speakers 403',   locSpkCreate.status === 403, locSpkCreate.status);
+  assert('LOC PUT /anubhav/speakers/:id 403', locSpkUpd.status   === 403, locSpkUpd.status);
+  assert('LOC DELETE /anubhav/speakers/:id 403', locSpkDel.status === 403, locSpkDel.status);
+
+  // 17f. Restore admin (role=admin) → admin can delete (soft delete).
+  await query("UPDATE users SET role='admin', event_role='dexco', loc_place=NULL WHERE username='admin'");
+  if (spkId) {
+    const adminSpkDel = await del('/anubhav/speakers/' + spkId, token);
+    assert('admin DELETE /anubhav/speakers/:id 200', adminSpkDel.status === 200, adminSpkDel.status + ': ' + adminSpkDel.body?.message);
+    // Soft-deleted speaker must not appear on the public route.
+    const pubAfterDel = await get('/anubhav/public/speakers', null, 'place=phagwara');
+    const stillThere = (pubAfterDel.body.data?.speakers || []).some(s => s.name === 'E2E Speaker Updated');
+    assert('soft-deleted speaker absent from public route', !stillThere, JSON.stringify(pubAfterDel.body.data?.speakers || []));
+    // Hard-clean the E2E speaker row.
+    await query('DELETE FROM anubhav_speakers WHERE id=?', [spkId]);
+  }
+
   // Restore admin event_role to none
   await query('UPDATE users SET event_role=?,loc_place=NULL WHERE username=?', ['none', 'admin']);
   console.log('\n[Cleanup] Reset admin event_role → none');
