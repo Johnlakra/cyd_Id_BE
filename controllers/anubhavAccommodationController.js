@@ -308,7 +308,8 @@ const getRoomingData = async (req, res) => {
                 p.father AS occupant_father_name,
                 p.phone AS occupant_phone, p.parish AS occupant_parish,
                 p.deanery AS occupant_deanery,
-                p.photo_url AS occupant_photo_url
+                p.photo_url AS occupant_photo_url,
+                p.is_independent AS occupant_is_independent
             FROM anubhav_buildings b
             JOIN anubhav_floors f      ON f.building_id = b.id
             JOIN anubhav_rooms r       ON r.floor_id = f.id
@@ -346,7 +347,8 @@ const getRoomingData = async (req, res) => {
                     phone: row.occupant_phone,
                     parish: row.occupant_parish,
                     deanery: row.occupant_deanery,
-                    photo_url: row.occupant_photo_url || null
+                    photo_url: row.occupant_photo_url || null,
+                    is_independent: row.occupant_is_independent
                 });
             }
         }

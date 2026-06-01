@@ -2,6 +2,7 @@
 const { query, queryOne } = require('../config/database');
 const { saveBase64Image, deleteFile, validateBase64Image } = require('../utils/fileUpload');
 const bcrypt = require('bcryptjs');
+const { isIdCardComplete, missingIdCardFields } = require('./anubhavConstants');
 
 // Helper function to normalize name for comparison
 const normalizeName = (name) => {
@@ -232,6 +233,10 @@ const getProfiles = async (req, res) => {
         let queryParams = [];
 
         whereConditions.push('p.status = 1');
+        // Independents (Anubhav Option B) are profile rows flagged is_independent=1.
+        // They must NOT appear on the ID-card profile list — only real ID-card
+        // profiles are shown here. Independents are managed via /anubhav/independents.
+        whereConditions.push('p.is_independent = 0');
 
         // Base permission check - Profile holders can only see their own profile
         if (req.user.role === 'profile_holder') {
@@ -812,11 +817,65 @@ const getProfileStats = async (req, res) => {
     }
 };
 
+// Get ID-card-ready data for a profile, gated on completeness.
+// GET /api/profiles/:id/idcard-data
+// Returns 400 with { missing_fields } when the profile is missing any
+// ID-card-required field (this is the only place ID-card printing is gated, and
+// it blocks printing for incomplete rows — including not-yet-promoted independents).
+const getIdCardData = async (req, res) => {
+    try {
+        const profileId = parseInt(req.params.id);
+
+        let whereClause = 'WHERE p.id = ?';
+        let params = [profileId];
+
+        // Same access scoping as getProfileById: non-admins limited to own rows.
+        if (req.user.role !== 'admin') {
+            whereClause += ' AND p.created_by = ?';
+            params.push(req.user.id);
+        }
+
+        const profile = await queryOne(
+            `SELECT p.* FROM profile p ${whereClause}`,
+            params
+        );
+
+        if (!profile) {
+            return res.status(404).json({
+                success: false,
+                message: 'Profile not found or access denied'
+            });
+        }
+
+        if (!isIdCardComplete(profile)) {
+            return res.status(400).json({
+                success: false,
+                message: 'ID card cannot be printed: required fields are missing',
+                missing_fields: missingIdCardFields(profile)
+            });
+        }
+
+        res.json({
+            success: true,
+            message: 'ID card data retrieved',
+            data: { profile }
+        });
+    } catch (error) {
+        console.error('Get ID card data error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to retrieve ID card data',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
 module.exports = {
     createProfile,
     getProfiles,
     getFilterOptions, // NEW - Add this to exports
     getProfileById,
+    getIdCardData,
     updateProfile,
     updateLimitedProfile,
     deleteProfile: softDeleteProfile,

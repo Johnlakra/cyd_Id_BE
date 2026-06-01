@@ -594,6 +594,240 @@ async function run() {
   await query('UPDATE users SET event_role=?,loc_place=NULL WHERE username=?', ['none', 'admin']);
   console.log('\n[Cleanup] Reset admin event_role → none');
 
+  // ── 16. Independent entries (Option B) ─────────────────────────────────────
+  // Independents are profile rows flagged is_independent=1. They are managed via
+  // /anubhav/independents, never appear on /profiles, flow through eligible →
+  // register → fees → rooming, and can be promoted to full ID-card profiles.
+  console.log('\n[16] Independent entries (Option B)');
+
+  const bcrypt = require('bcryptjs');
+  const DEANERY_PHAGWARA = 'Hoshiarpur';   // assigned to phagwara
+  const DEANERY_ABOHAR   = 'Moga';         // assigned to abohar
+
+  // Pre-clean any leftovers from prior runs (independents + their users).
+  const cleanupIndependents = async () => {
+    const stale = await query(
+      "SELECT id, profile_user_id FROM profile WHERE name LIKE 'E2E Indep%'");
+    for (const row of stale) {
+      await query(`DELETE a FROM anubhav_allotments a
+        JOIN anubhav_registrations r ON r.id = a.registration_id
+        WHERE r.profile_id = ?`, [row.id]);
+      await query('DELETE FROM anubhav_registrations WHERE profile_id = ?', [row.id]);
+      await query('DELETE FROM profile WHERE id = ?', [row.id]);
+      if (row.profile_user_id) {
+        await query('DELETE FROM users WHERE id = ?', [row.profile_user_id]);
+      }
+    }
+    // Also drop any users created by promotion of E2E independents (by email prefix).
+    await query("DELETE FROM users WHERE email LIKE 'e2eindep%@cydidcard.com'");
+  };
+  await cleanupIndependents();
+
+  // Make admin a dexco for create/list flows (promote uses admin role directly).
+  await query('UPDATE users SET event_role=?,loc_place=NULL WHERE username=?', ['dexco', 'admin']);
+
+  // Seed a real LOC user (abohar) we can log in as, to test place scoping + promote gate.
+  const locPwd = 'E2ELocPass1';
+  const locHash = await bcrypt.hash(locPwd, 12);
+  let e2eLoc = await queryOne("SELECT id FROM users WHERE username = 'e2e_loc_user'");
+  if (e2eLoc) {
+    await query("UPDATE users SET password=?, role='profile_holder', event_role='loc', loc_place='abohar', status=1 WHERE id=?",
+      [locHash, e2eLoc.id]);
+  } else {
+    const r = await query(
+      "INSERT INTO users (username, email, password, role, status, event_role, loc_place, created_at, updated_at) VALUES (?,?,?,?,1,?,?,NOW(),NOW())",
+      ['e2e_loc_user', 'e2e_loc_user@cydidcard.com', locHash, 'profile_holder', 'loc', 'abohar']);
+    e2eLoc = { id: r.insertId };
+  }
+  const locLogin = await post('/auth/login', { username: 'e2e_loc_user', password: locPwd });
+  const locToken = locLogin.body?.data?.token || locLogin.body?.token;
+  assert('LOC user login 200', locLogin.status === 200, locLogin.status);
+  assert('LOC token received', !!locToken, JSON.stringify(locLogin.body).slice(0, 150));
+
+  // 16a. LOC creates an independent in its OWN place (abohar) → 201.
+  const locCreate = await post('/anubhav/independents', {
+    place: 'abohar', deanery: DEANERY_ABOHAR, parish: 'E2E Indep Parish A', name: 'E2E Indep Loc',
+  }, locToken);
+  assert('LOC create independent in own place → 201', locCreate.status === 201, locCreate.status + ': ' + locCreate.body?.message);
+  const locIndepId = locCreate.body.data?.profile_id;
+  assert('create returns profile_id', !!locIndepId, JSON.stringify(locCreate.body.data));
+
+  // 16b. LOC cross-place create (phagwara) → 403 (requirePlaceAccess).
+  const locCross = await post('/anubhav/independents', {
+    place: 'phagwara', deanery: DEANERY_PHAGWARA, parish: 'X', name: 'E2E Indep Cross',
+  }, locToken);
+  assert('LOC cross-place create → 403', locCross.status === 403, locCross.status + ': ' + locCross.body?.message);
+
+  // 16c. Admin (dexco) creates a MINIMAL independent in phagwara for the lifecycle.
+  const minCreate = await post('/anubhav/independents', {
+    place: 'phagwara', deanery: DEANERY_PHAGWARA, parish: 'E2E Indep Parish P', name: 'E2E Indep Phagwara',
+  }, token);
+  assert('admin create minimal independent → 201', minCreate.status === 201, minCreate.status + ': ' + minCreate.body?.message);
+  const indepId = minCreate.body.data?.profile_id;
+  assert('minimal create returns profile_id', !!indepId, JSON.stringify(minCreate.body.data));
+
+  // 16d. Missing required field → 400.
+  const badCreate = await post('/anubhav/independents', {
+    place: 'phagwara', deanery: DEANERY_PHAGWARA, parish: 'X',  // no name
+  }, token);
+  assert('create missing name → 400', badCreate.status === 400, badCreate.status + ': ' + badCreate.body?.message);
+
+  // 16e. /anubhav/independents returns ONLY independents, with id_card_complete=false for minimal.
+  const indepList = await get('/anubhav/independents', token, 'place=phagwara');
+  assert('GET /anubhav/independents 200', indepList.status === 200, indepList.status);
+  const indeps = indepList.body.data?.independents || [];
+  const mine = indeps.find(i => i.id === indepId);
+  assert('minimal independent present in list', !!mine, 'count=' + indeps.length);
+  assert('all listed rows are is_independent=1', indeps.every(i => i.is_independent === 1), JSON.stringify(indeps.map(i => i.is_independent)));
+  assert('minimal independent id_card_complete=false', mine && mine.id_card_complete === false, JSON.stringify(mine));
+
+  // 16f. The independent must NOT appear in the /profiles list.
+  const profList = await get('/profiles', token, 'search=' + encodeURIComponent('E2E Indep Phagwara') + '&limit=50');
+  const profRows = profList.body.data?.profiles || [];
+  assert('/profiles excludes independents', !profRows.some(p => p.id === indepId), 'found ' + indepId + ' in /profiles');
+
+  // 16g. ID-card data fetch blocked (400 + missing_fields) for incomplete independent.
+  const idcardBlocked = await get('/profiles/' + indepId + '/idcard-data', token);
+  assert('idcard-data incomplete → 400', idcardBlocked.status === 400, idcardBlocked.status + ': ' + idcardBlocked.body?.message);
+  assert('idcard-data 400 has missing_fields array', Array.isArray(idcardBlocked.body?.missing_fields), JSON.stringify(idcardBlocked.body));
+
+  // 16h. Lifecycle: independent appears in /anubhav/eligible (with is_independent flag).
+  const eligIndep = await get('/anubhav/eligible', token, 'place=phagwara&search=' + encodeURIComponent('E2E Indep Phagwara'));
+  const eligIndepList = eligIndep.body.data?.profiles || (Array.isArray(eligIndep.body.data) ? eligIndep.body.data : []);
+  const eligRow = eligIndepList.find(p => p.id === indepId);
+  assert('independent appears in /anubhav/eligible', !!eligRow, 'count=' + eligIndepList.length);
+  assert('eligible row carries is_independent=1', eligRow && eligRow.is_independent === 1, JSON.stringify(eligRow));
+
+  // 16i. Register the independent → /anubhav/fees includes them at ₹50.
+  const indepReg = await post('/anubhav/registrations', { place: 'phagwara', profile_id: indepId }, token);
+  assert('register independent → 201', indepReg.status === 201, indepReg.status + ': ' + indepReg.body?.message);
+  const indepRegId = indepReg.body.data?.registration?.id;
+  const feesAfter = await get('/anubhav/fees', token, 'place=phagwara');
+  assert('fees placeCount×50 = placeTotal after independent reg',
+    feesAfter.body.data?.placeTotal === 50 * feesAfter.body.data?.placeCount,
+    JSON.stringify(feesAfter.body.data).slice(0, 120));
+
+  // 16j. registrations list carries is_independent for the badge.
+  const regListIndep = await get('/anubhav/registrations', token, 'place=phagwara');
+  const regRow = (regListIndep.body.data?.registrations || []).find(r => r.profile_id === indepId);
+  assert('registrations row carries is_independent=1', regRow && regRow.is_independent === 1, JSON.stringify(regRow));
+
+  // 16k. Allot the independent → rooming returns occupant_is_independent=1.
+  const indepBldg = await post('/anubhav/buildings', { place: 'phagwara', name: 'E2E Indep Block' }, token);
+  const indepBId = indepBldg.body.data?.building?.id || indepBldg.body.data?.id;
+  const indepFloor = await post('/anubhav/floors', { building_id: indepBId, name: 'GF', level: 0 }, token);
+  const indepFId = indepFloor.body.data?.floor?.id || indepFloor.body.data?.id;
+  const indepRoom = await post('/anubhav/rooms', { floor_id: indepFId, name: 'Indep-Room', capacity: 4 }, token);
+  const indepRId = indepRoom.body.data?.room?.id || indepRoom.body.data?.id;
+  await post('/anubhav/allotments', { room_id: indepRId, registration_id: indepRegId }, token);
+  const indepRooming = await get('/anubhav/rooming', token, 'place=phagwara&room_id=' + indepRId);
+  const occ = indepRooming.body.data?.buildings?.[0]?.floors?.[0]?.rooms?.[0]?.occupants?.[0];
+  assert('rooming occupant has occupant_is_independent flag (=1)', occ && occ.is_independent === 1, JSON.stringify(occ));
+
+  // 16l. Delete blocked while an active registration exists → 409.
+  const delBlocked = await del('/anubhav/independents/' + indepId, token);
+  assert('delete with active registration → 409', delBlocked.status === 409, delBlocked.status + ': ' + delBlocked.body?.message);
+
+  // 16m. Promote: missing field → 400 (minimal row, no body fields supplied).
+  const promoteMissing = await post('/anubhav/independents/' + indepId + '/promote', {}, token);
+  assert('promote with missing fields → 400', promoteMissing.status === 400, promoteMissing.status + ': ' + promoteMissing.body?.message);
+  assert('promote 400 lists missing_fields', Array.isArray(promoteMissing.body?.missing_fields) && promoteMissing.body.missing_fields.length > 0, JSON.stringify(promoteMissing.body));
+
+  // 16n. loc/dexco CANNOT promote (admin only). e2e_loc_user is a LOC.
+  //      Use a phagwara-scoped independent id; the role gate fires before any place logic.
+  const locPromote = await post('/anubhav/independents/' + indepId + '/promote', {}, locToken);
+  assert('LOC promote → 403 (admin only)', locPromote.status === 403, locPromote.status + ': ' + locPromote.body?.message);
+
+  // Snapshot registrations BEFORE promotion to prove the registration survives.
+  const regBefore = await queryOne(
+    'SELECT id, profile_id, status FROM anubhav_registrations WHERE id = ?', [indepRegId]);
+  assert('pre-promote: registration active', regBefore && regBefore.status === 1, JSON.stringify(regBefore));
+
+  // 16o. Promote with a COMPLETE payload → 200; row flips to is_independent=0.
+  const promotePayload = {
+    name: 'E2E Indep Phagwara', father_name: 'E2E Father', deanery: DEANERY_PHAGWARA,
+    parish: 'E2E Indep Parish P', date_of_birth: '2005-03-14', phone: '7011220033',
+    postal_address: 'E2E Promote Address', level: 'YCS', designation: 'Youth',
+    photo_url: 'https://example.com/e2e-indep.jpg',
+  };
+  const promoteOk = await post('/anubhav/independents/' + indepId + '/promote', promotePayload, token);
+  assert('promote complete payload → 200', promoteOk.status === 200, promoteOk.status + ': ' + promoteOk.body?.message);
+  const promotedUsername = promoteOk.body.data?.credentials?.username;
+  assert('promote returns generated username', !!promotedUsername, JSON.stringify(promoteOk.body.data?.credentials));
+
+  // Row flipped to is_independent=0, keeps the SAME profile id.
+  const flipped = await queryOne('SELECT id, is_independent, profile_user_id, independent_added_by FROM profile WHERE id = ?', [indepId]);
+  assert('promoted row is_independent=0', flipped && flipped.is_independent === 0, JSON.stringify(flipped));
+  assert('promoted row keeps same profile id', flipped && flipped.id === indepId, JSON.stringify(flipped));
+  assert('promoted row independent_added_by cleared', flipped && flipped.independent_added_by === null, JSON.stringify(flipped));
+  assert('promoted row linked to a user', flipped && !!flipped.profile_user_id, JSON.stringify(flipped));
+
+  // 16p. Existing active registration STILL active with the SAME profile_id.
+  const regAfter = await queryOne(
+    'SELECT id, profile_id, status FROM anubhav_registrations WHERE id = ?', [indepRegId]);
+  assert('post-promote: registration still active', regAfter && regAfter.status === 1, JSON.stringify(regAfter));
+  assert('post-promote: registration same profile_id', regAfter && regAfter.profile_id === indepId, JSON.stringify(regAfter));
+
+  // 16q. users row matches the migrateProfileUsers pattern.
+  const promotedUser = await queryOne(
+    'SELECT id, username, password, role FROM users WHERE id = ?', [flipped.profile_user_id]);
+  assert('promoted user role = profile_holder', promotedUser && promotedUser.role === 'profile_holder', JSON.stringify(promotedUser));
+  // username = first 4 letters of name (letters only, lowercased) + DDMM from DOB.
+  // 'E2E Indep Phagwara' → strip non-letters → 'eeindepphagwara' → first 4 'eein';
+  // DOB 2005-03-14 → DDMM '1403'. (Matches migrateProfileUsers.generateUsername.)
+  assert('username follows 4-letter+DDMM scheme', promotedUser && /^eein1403/.test(promotedUser.username),
+    'username=' + (promotedUser && promotedUser.username));
+  const pwOk = promotedUser && await bcrypt.compare('7011220033', promotedUser.password);
+  assert('password verifies against cleaned phone (bcrypt)', !!pwOk, 'username=' + (promotedUser && promotedUser.username));
+
+  // 16r. Promoted youth can log in and GET /anubhav/my/event returns their data.
+  const youthLogin = await post('/auth/login', { username: promotedUsername, password: '7011220033' });
+  assert('promoted youth login → 200', youthLogin.status === 200, youthLogin.status + ': ' + JSON.stringify(youthLogin.body).slice(0, 120));
+  const youthToken = youthLogin.body?.data?.token || youthLogin.body?.token;
+  const myEvent = await get('/anubhav/my/event', youthToken);
+  assert('promoted youth /anubhav/my/event 200', myEvent.status === 200, myEvent.status);
+  assert('promoted youth registered:true', myEvent.body.data?.registered === true, JSON.stringify(myEvent.body.data).slice(0, 150));
+
+  // 16s. ID-card data now succeeds (row complete). created_by=admin so admin can fetch.
+  const idcardOk = await get('/profiles/' + indepId + '/idcard-data', token);
+  assert('idcard-data complete → 200', idcardOk.status === 200, idcardOk.status + ': ' + idcardOk.body?.message);
+
+  // 16t. Username collision: promote a SECOND independent with same name+DOB → suffix.
+  const collideCreate = await post('/anubhav/independents', {
+    place: 'phagwara', deanery: DEANERY_PHAGWARA, parish: 'E2E Indep Parish P2', name: 'E2E Indep Phagwara',
+  }, token);
+  const collideId = collideCreate.body.data?.profile_id;
+  const collidePromote = await post('/anubhav/independents/' + collideId + '/promote', {
+    ...promotePayload, parish: 'E2E Indep Parish P2', phone: '7022330044',
+  }, token);
+  assert('second promote (same name+DOB) → 200', collidePromote.status === 200, collidePromote.status + ': ' + collidePromote.body?.message);
+  const collideUsername = collidePromote.body.data?.credentials?.username;
+  assert('collision username differs from first', collideUsername && collideUsername !== promotedUsername,
+    'first=' + promotedUsername + ' second=' + collideUsername);
+  assert('collision username has base + suffix', collideUsername && collideUsername.startsWith('eein1403') && collideUsername.length > 'eein1403'.length,
+    'second=' + collideUsername);
+
+  // 16u. Independent with NO active registration can be soft-deleted → 200.
+  const delOk = await del('/anubhav/independents/' + locIndepId, locToken);
+  assert('delete independent (no active reg) → 200', delOk.status === 200, delOk.status + ': ' + delOk.body?.message);
+  const delGone = await queryOne('SELECT status FROM profile WHERE id = ?', [locIndepId]);
+  assert('deleted independent status=0', delGone && delGone.status === 0, JSON.stringify(delGone));
+
+  // Cleanup section 16: registrations/allotments/profiles/users created here.
+  await query('DELETE FROM anubhav_allotments WHERE registration_id = ?', [indepRegId]);
+  await query('DELETE FROM anubhav_registrations WHERE profile_id IN (?, ?)', [indepId, collideId]);
+  await del('/anubhav/buildings/' + indepBId, token);
+  // Remove promoted users + their now-real profiles, plus the LOC-created independent.
+  for (const pid of [indepId, collideId]) {
+    const prow = await queryOne('SELECT profile_user_id FROM profile WHERE id = ?', [pid]);
+    await query('DELETE FROM profile WHERE id = ?', [pid]);
+    if (prow && prow.profile_user_id) await query('DELETE FROM users WHERE id = ?', [prow.profile_user_id]);
+  }
+  await query('DELETE FROM profile WHERE id = ?', [locIndepId]);
+  await query("DELETE FROM users WHERE username = 'e2e_loc_user'");
+  await query('UPDATE users SET event_role=?,loc_place=NULL WHERE username=?', ['none', 'admin']);
+  console.log('  [Cleanup] Section 16 independents/users removed');
+
   // ── Summary ────────────────────────────────────────────────────────────────
   console.log('\n=== RESULTS ===');
   console.log('  PASSED:', passed);

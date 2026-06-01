@@ -8,6 +8,7 @@
     "dev": "nodemon server.js",
     "init-db": "node scripts/initDatabase.js",
     "migrate-anubhav": "node scripts/runAnubhavMigration.js",
+    "migrate-anubhav-independent": "node scripts/runIndependentEntryMigration.js",
     "test:anubhav-e2e": "node scripts/anubhav-e2e.js",
     "reconcile-deanery-parish": "node scripts/reconcileDeaneryParish.js"
   },

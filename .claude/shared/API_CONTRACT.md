@@ -34,12 +34,56 @@ GET   /anubhav/deanery-parish-map           (any authenticated user)
 ## Registration (Phase 1)
 ```
 GET   /anubhav/eligible?place=&deanery=&parish=&search=   -> profiles eligible for that place
+      // each row now includes `is_independent` (0|1) for the "Independent" badge
 POST  /anubhav/registrations         { place, profile_id, chaperone_id? }
 GET   /anubhav/registrations?place=&deanery=&parish=      -> registered youth + counts
+      // each registration row now includes `is_independent` (0|1) for the badge
 DELETE/anubhav/registrations/:id
 GET   /anubhav/chaperones?place=&parish=                  -> chaperones for a parish group
 POST  /anubhav/chaperones            { place, parish, name, phone, type }  // Sister | Catechist
 GET   /anubhav/fees?place=           -> { perYouth:50, byParish:[{deanery,parish,count,total}], byDeanery:[{deanery,count,total}], placeTotal:number, placeCount:number, overall:number, overallCount:number }
+```
+
+## Independent entries (Option B)
+Independents are stored as ordinary `profile` rows flagged `is_independent=1`. They are
+managed only through the endpoints below, NEVER appear on the ID-card `/profiles` list,
+and flow through eligible → register → fees → rooming like any other profile (joined on
+`profile_id`). They have no `users` login row until promoted.
+```
+POST  /anubhav/independents          { place, deanery, parish, name, father_name?, phone?,
+                                       date_of_birth?, level?, designation?, postal_address?,
+                                       photo_url? }
+      // required = name, deanery, parish, place. deanery must belong to place.
+      // access: admin / dexco / loc (loc restricted to loc_place). 201 -> { profile_id, independent }
+      // missing required field -> 400 { message, missing_fields:[...] }
+
+GET   /anubhav/independents?place=&deanery=&parish=&search=
+      // access: admin / dexco / loc (place-scoped). Returns ONLY is_independent=1 rows.
+      // -> { place, independents:[{ id, name, father_name, date_of_birth, phone, deanery,
+      //                             parish, level, designation, postal_address, photo_url,
+      //                             is_independent, place, id_card_complete:bool }], count }
+
+PUT   /anubhav/independents/:id       { name?, father_name?, date_of_birth?, phone?, deanery?,
+                                        parish?, level?, designation?, postal_address?, photo_url? }
+      // all optional; only is_independent=1 rows are editable here. loc place-checked via the row.
+
+DELETE/anubhav/independents/:id
+      // soft delete (profile.status=0). 409 { message:"Un-register from Anubhav first, then delete." }
+      // if an active anubhav_registration exists for this profile. loc place-checked via the row.
+
+POST  /anubhav/independents/:id/promote   { name?, father_name?, deanery?, parish?, date_of_birth?,
+                                            phone?, postal_address?, level?, designation?, photo_url? }
+      // ADMIN ONLY (loc/dexco -> 403). Body fields fill any gaps already on the row.
+      // ALL ID-card-required fields must end up present (body OR existing row), else:
+      //   400 { message, missing_fields:[...] }   // names in API form, e.g. ["father_name","dob"... ]
+      // On success (200): atomically flips is_independent->0, fills the ID-card fields,
+      // creates a `users` row (role=profile_holder; username = first 4 letters of name +
+      // DDMM of DOB; password = phone digits via bcrypt; email <username>@cydidcard.com;
+      // numeric suffix on username collision), and links profile.profile_user_id.
+      // The profile.id never changes, so existing registrations/allotments keep working.
+      // -> { profile, credentials:{ username, password_hint, message } }
+      // ID-card-required fields: name, father_name, deanery, parish, date_of_birth, phone,
+      //   postal_address, level, designation, photo_url.
 ```
 
 ## Accommodation (Phase 2)
@@ -52,6 +96,8 @@ POST  /anubhav/allotments            { room_id, registration_id }
 DELETE/anubhav/allotments/:id
 GET   /anubhav/rooming?place=&building_id?&floor_id?&room_id?  -> data shaped for PDF generation
                                      // occupants now include photo_url (for on-screen Room Board avatars)
+                                     // occupants also include is_independent (0|1) — from
+                                     // p.is_independent AS occupant_is_independent — for the badge
 
 DELETE/anubhav/buildings/:id         (admin or dexco only — LOC → 403)
 DELETE/anubhav/floors/:id            (admin or dexco only — LOC → 403)
@@ -100,6 +146,20 @@ GET   /anubhav/my/event                      -> self-scoped; no place param; no 
 ```
 **Role deassign path:** `POST /anubhav/roles/grant` with `event_role: "none"` is the deassign
 path — it clears `loc_place` to `null`. No separate deassign endpoint is needed.
+
+## ID-card profiles — contract changes (Option B)
+- `GET /profiles` (the ID-card profile list) now EXCLUDES independents: the query adds
+  `AND p.is_independent = 0`. ManageProfiles must use a separate tab that calls
+  `GET /anubhav/independents` for the independent list. Create / edit / delete of real
+  ID-card profiles are unchanged.
+- `GET /profiles/:id/idcard-data` (new) gates ID-card printing. It returns the full
+  profile only when every ID-card-required field is present; otherwise:
+  `400 { success:false, message, missing_fields:[...] }`. The frontend must call this
+  before printing and disable the print button (with a tooltip listing `missing_fields`)
+  when `id_card_complete=false` / the call returns 400. The completeness rule is the
+  exact same one surfaced as `id_card_complete` on `GET /anubhav/independents` rows.
+  ID-card-required fields: name, father_name (col `father`), deanery, parish,
+  date_of_birth (col `dob`), phone, postal_address, level, designation, photo_url.
 
 ## Notes for the frontend session
 - All list endpoints already return counts where useful; do fee math display only,

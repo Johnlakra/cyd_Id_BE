@@ -15,6 +15,7 @@ const allotmentController = require('../controllers/anubhavAllotmentController')
 const timetableController = require('../controllers/anubhavTimetableController');
 const announcementController = require('../controllers/anubhavAnnouncementController');
 const participantController = require('../controllers/anubhavParticipantController');
+const independentController = require('../controllers/anubhavIndependentController');
 
 // Phase 1 endpoints all require an event role (LOC or DEXCO) and a valid place.
 // requirePlaceAccess additionally enforces LOC -> loc_place scoping.
@@ -98,6 +99,36 @@ router.delete(
 // @route   GET /anubhav/fees?place=
 // @desc    Fee breakdown for a place + overall across all places
 router.get('/fees', eventStaff, registrationController.getFees);
+
+// ---------- Independent entries (Option B) ----------
+// Independents are profile rows flagged is_independent=1. They do NOT appear on
+// the ID-card profile screens (the /profiles list filters them out) but flow
+// through every Anubhav path as ordinary profiles.
+
+// @route   POST /anubhav/independents   body: { place, deanery, parish, name, ... }
+// @desc    Create an independent entry (place-scoped; LOC -> loc_place)
+router.post('/independents', eventStaff, independentController.createIndependent);
+
+// @route   GET /anubhav/independents?place=&deanery=&parish=&search=
+// @desc    List independents for a place (each row carries id_card_complete)
+router.get('/independents', eventStaff, independentController.listIndependents);
+
+// @route   PUT /anubhav/independents/:id   (place check via the row in-controller)
+// @desc    Update an independent (only is_independent=1 rows)
+router.put('/independents/:id', requireEventRole(['loc', 'dexco']), independentController.updateIndependent);
+
+// @route   DELETE /anubhav/independents/:id   (place check via the row in-controller)
+// @desc    Soft-delete an independent (409 if an active registration exists)
+router.delete('/independents/:id', requireEventRole(['loc', 'dexco']), independentController.deleteIndependent);
+
+// @route   POST /anubhav/independents/:id/promote
+// @desc    Promote an independent -> full ID-card profile + login (admin ONLY)
+router.post('/independents/:id/promote', (req, res, next) => {
+    if (req.user.role !== 'admin') {
+        return res.status(403).json({ success: false, message: 'Admin access required' });
+    }
+    next();
+}, independentController.promoteIndependent);
 
 // ---------- Phase 2: Accommodation ----------
 

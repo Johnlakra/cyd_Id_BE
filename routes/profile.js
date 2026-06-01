@@ -40,6 +40,14 @@ router.get('/stats', [
     requireAdmin
 ], profileController.getProfileStats);
 
+// @route   GET /api/profiles/:id/idcard-data
+// @desc    Get ID-card-ready data for a profile; 400 + missing_fields if incomplete.
+//          This gates ID-card printing (incomplete rows, incl. un-promoted
+//          independents, cannot be printed).
+// @access  Private
+// IMPORTANT: must come BEFORE the bare /:id route so the more specific path wins.
+router.get('/:id/idcard-data', authenticateToken, profileController.getIdCardData);
+
 // @route   GET /api/profiles/:id
 // @desc    Get profile by ID
 // @access  Private

@@ -53,7 +53,7 @@ const listEligible = async (req, res) => {
 
         const profiles = await query(`
             SELECT p.id, p.name, p.father AS father_name, p.phone, p.deanery, p.parish,
-                   p.level, p.designation, p.photo_url
+                   p.level, p.designation, p.photo_url, p.is_independent
             FROM profile p
             WHERE ${conditions.join(' AND ')}
             ORDER BY p.deanery, p.parish, p.name
@@ -228,6 +228,7 @@ const listRegistrations = async (req, res) => {
                 p.parish,
                 p.level,
                 p.photo_url,
+                p.is_independent,
                 c.id            AS chaperone_id,
                 c.name          AS chaperone_name,
                 c.phone         AS chaperone_phone,
