@@ -4,13 +4,18 @@ CREATE TABLE IF NOT EXISTS anubhav_speakers (
   name VARCHAR(150) NOT NULL,
   role VARCHAR(150),
   bio TEXT,
-  photo_url VARCHAR(255),
+  photo_url LONGTEXT,
   sort_order INT DEFAULT 0,
   status TINYINT DEFAULT 1,
   created_by INT,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (created_by) REFERENCES users(id)
 );
+
+-- Widen photo_url to LONGTEXT on tables that already exist (CREATE TABLE
+-- IF NOT EXISTS above is skipped on prod, so the type change must be applied
+-- explicitly). MODIFY is idempotent: re-running just re-asserts the same type.
+ALTER TABLE anubhav_speakers MODIFY COLUMN photo_url LONGTEXT;
 
 -- 002_anubhav_speakers.sql
 -- Anubhav Retreat 2026 — speakers table for the public website.
