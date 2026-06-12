@@ -16,6 +16,7 @@ const platformRoutes = require('./routes/platform');
 const orgRoutes = require('./routes/org');
 const importRoutes = require('./routes/imports');
 const permissionRoutes = require('./routes/permissions');
+const idCardTemplateRoutes = require('./routes/idCardTemplates');
 
 // Initialize Express app
 const app = express();
@@ -66,6 +67,8 @@ app.use('/org', orgRoutes);
 app.use('/imports', importRoutes);
 // Granular RBAC management (roles, matrix, per-user overrides).
 app.use('/permissions', permissionRoutes);
+// ID card template designer (per-diocese layouts; FE falls back to legacy).
+app.use('/idcard-templates', idCardTemplateRoutes);
 
 // Handle 404 routes
 // app.use('*', (req, res) => {
