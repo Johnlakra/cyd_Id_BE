@@ -557,5 +557,9 @@ module.exports = {
     // exported for tests / reuse
     generateUsername,
     getPasswordFromPhone,
-    placeOfDeanery
+    placeOfDeanery,
+    // user-provisioning helpers reused by the bulk import pipeline (Phase 2)
+    generateEmail,
+    ensureUniqueUsername,
+    ensureUniqueEmail
 };

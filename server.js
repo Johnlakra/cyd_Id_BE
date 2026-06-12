@@ -13,6 +13,8 @@ const profileHolderRoutes = require('./routes/profileHolder');
 const anubhavRoutes = require('./routes/anubhav');
 const anubhavPublicRoutes = require('./routes/anubhavPublic');
 const platformRoutes = require('./routes/platform');
+const orgRoutes = require('./routes/org');
+const importRoutes = require('./routes/imports');
 
 // Initialize Express app
 const app = express();
@@ -58,6 +60,9 @@ app.use('/anubhav/public', anubhavPublicRoutes);
 app.use('/anubhav', anubhavRoutes);
 // Multi-diocese platform routes (registration is public, management is super_admin).
 app.use('/platform', platformRoutes);
+// Per-diocese org structure CRUD + Excel bulk import (admin, tenant-scoped).
+app.use('/org', orgRoutes);
+app.use('/imports', importRoutes);
 
 // Handle 404 routes
 // app.use('*', (req, res) => {
