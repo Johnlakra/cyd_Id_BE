@@ -6,6 +6,7 @@
 // youth username convention is adapted to the slug).
 const bcrypt = require('bcryptjs');
 const { pool, query, queryOne } = require('../config/database');
+const { provisionSystemRoles } = require('../services/permissionService');
 
 const SLUG_PATTERN = /^[a-z0-9][a-z0-9-]{1,58}$/;
 const BCRYPT_ROUNDS = 12;
@@ -122,6 +123,9 @@ const approveDiocese = async (req, res) => {
             );
             adminCreated = true;
         }
+
+        // Seed the diocese's system roles from the diocese-1 template (Phase 3).
+        await provisionSystemRoles(connection, dioceseId);
 
         await connection.execute('UPDATE dioceses SET status = \'active\' WHERE id = ?', [dioceseId]);
         await connection.commit();

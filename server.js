@@ -15,6 +15,7 @@ const anubhavPublicRoutes = require('./routes/anubhavPublic');
 const platformRoutes = require('./routes/platform');
 const orgRoutes = require('./routes/org');
 const importRoutes = require('./routes/imports');
+const permissionRoutes = require('./routes/permissions');
 
 // Initialize Express app
 const app = express();
@@ -63,6 +64,8 @@ app.use('/platform', platformRoutes);
 // Per-diocese org structure CRUD + Excel bulk import (admin, tenant-scoped).
 app.use('/org', orgRoutes);
 app.use('/imports', importRoutes);
+// Granular RBAC management (roles, matrix, per-user overrides).
+app.use('/permissions', permissionRoutes);
 
 // Handle 404 routes
 // app.use('*', (req, res) => {

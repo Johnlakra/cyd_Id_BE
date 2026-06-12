@@ -6,11 +6,14 @@ const { body } = require('express-validator');
 const router = express.Router();
 
 const importController = require('../controllers/importController');
-const { authenticateToken, requireAdmin } = require('../middleware/auth');
+const { authenticateToken } = require('../middleware/auth');
 const { tenantScope } = require('../middleware/tenantScope');
+const { requirePermission } = require('../middleware/requirePermission');
 const { handleValidationErrors } = require('../middleware/validation');
 
-router.use(authenticateToken, requireAdmin, tenantScope);
+// Granular gate (Phase 3): admins resolve to every key, so admin access is
+// unchanged; imports.run can additionally be granted to custom roles.
+router.use(authenticateToken, tenantScope, requirePermission('imports.run'));
 
 const fileRule = body('file_base64')
     .isString()

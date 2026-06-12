@@ -6,11 +6,14 @@ const { body, param } = require('express-validator');
 const router = express.Router();
 
 const orgController = require('../controllers/orgController');
-const { authenticateToken, requireAdmin } = require('../middleware/auth');
+const { authenticateToken } = require('../middleware/auth');
 const { tenantScope } = require('../middleware/tenantScope');
+const { requirePermission } = require('../middleware/requirePermission');
 const { handleValidationErrors } = require('../middleware/validation');
 
-router.use(authenticateToken, requireAdmin, tenantScope);
+// Granular gate (Phase 3): admins resolve to every key, so admin access is
+// unchanged; org.manage can additionally be granted to custom roles.
+router.use(authenticateToken, tenantScope, requirePermission('org.manage'));
 
 const nameRule = body('name')
     .trim()

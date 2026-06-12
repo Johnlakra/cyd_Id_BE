@@ -31,6 +31,12 @@ router.post('/logout', authenticateToken, authController.logout);
 // @access  Private
 router.get('/profile', authenticateToken, authController.getProfile);
 
+// @route   GET /auth/me/permissions
+// @desc    Flat effective permission key list (Platform Phase 3, additive)
+// @access  Private
+router.get('/me/permissions', authenticateToken,
+    require('../controllers/permissionController').getMyPermissions);
+
 // @route   PUT /api/auth/profile
 // @desc    Update user profile
 // @access  Private
