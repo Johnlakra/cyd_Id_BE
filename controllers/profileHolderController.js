@@ -4,9 +4,11 @@ const { query, queryOne } = require('../config/database');
 const { saveBase64Image, deleteFile, validateBase64Image } = require('../utils/fileUpload');
 
 // Generate JWT token
-const generateToken = (userId) => {
+// diocese_id claim added for multi-diocese platform; tokens issued before this
+// change (no claim) resolve to diocese 1 (Jalandhar) in middleware.
+const generateToken = (userId, dioceseId) => {
     return jwt.sign(
-        { userId },
+        { userId, diocese_id: dioceseId || 1 },
         process.env.JWT_SECRET,
         { expiresIn: process.env.JWT_EXPIRES_IN || '24h' }
     );
@@ -19,7 +21,7 @@ const profileHolderLogin = async (req, res) => {
 
         // Find profile holder by username
         const user = await queryOne(
-            'SELECT id, username, password, role FROM users WHERE username = ? AND role = "profile_holder" AND status = 1',
+            'SELECT id, username, password, role, diocese_id FROM users WHERE username = ? AND role = "profile_holder" AND status = 1',
             [username]
         );
 
@@ -54,7 +56,7 @@ const profileHolderLogin = async (req, res) => {
         }
 
         // Generate token
-        const token = generateToken(user.id);
+        const token = generateToken(user.id, user.diocese_id);
 
         // Remove password from user object
         delete user.password;

@@ -12,6 +12,7 @@ const profileRoutes = require('./routes/profile');
 const profileHolderRoutes = require('./routes/profileHolder');
 const anubhavRoutes = require('./routes/anubhav');
 const anubhavPublicRoutes = require('./routes/anubhavPublic');
+const platformRoutes = require('./routes/platform');
 
 // Initialize Express app
 const app = express();
@@ -55,6 +56,8 @@ app.use('/profile-holder', profileHolderRoutes);
 // /anubhav router so /anubhav/public/* is served without authenticateToken.
 app.use('/anubhav/public', anubhavPublicRoutes);
 app.use('/anubhav', anubhavRoutes);
+// Multi-diocese platform routes (registration is public, management is super_admin).
+app.use('/platform', platformRoutes);
 
 // Handle 404 routes
 // app.use('*', (req, res) => {
