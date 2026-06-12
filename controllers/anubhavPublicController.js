@@ -6,6 +6,7 @@ const { query, queryOne } = require('../config/database');
 const { PLACES } = require('../middleware/anubhavRole');
 const { buildEventSummary, PER_YOUTH_FEE } = require('../constants/anubhavEvent');
 const { dateToDay } = require('../utils/anubhavDay');
+const { formatDateLong, formatDateShort, formatTime } = require('../utils/anubhavDate');
 
 // Validate an optional ?place= query param. Returns { ok, place, error }.
 const parseOptionalPlace = (raw) => {
@@ -34,10 +35,19 @@ const fail = (res, error) => res.status(500).json({
 // Venues, dates, and deanery groups for the 3 places. All non-personal constants.
 const getEventSummary = async (req, res) => {
     try {
+        const summary = buildEventSummary();
+        // Add human-readable dates per place without dropping the raw YYYY-MM-DD.
+        const data = {
+            ...summary,
+            places: summary.places.map(p => ({
+                ...p,
+                datesFormatted: (p.dates || []).map(formatDateLong),
+            })),
+        };
         res.json({
             success: true,
             message: 'Event summary retrieved',
-            data: buildEventSummary(),
+            data,
         });
     } catch (error) {
         console.error('public getEventSummary error:', error);
@@ -68,10 +78,16 @@ const getAnnouncements = async (req, res) => {
                  ORDER BY created_at DESC`
             );
 
+        const announcements = rows.map(r => ({
+            ...r,
+            created_at_formatted: formatDateLong(r.created_at),
+            created_at_short: formatDateShort(r.created_at),
+        }));
+
         res.json({
             success: true,
             message: 'Announcements retrieved',
-            data: { place: parsed.place, announcements: rows, count: rows.length },
+            data: { place: parsed.place, announcements, count: announcements.length },
         });
     } catch (error) {
         console.error('public getAnnouncements error:', error);
@@ -89,10 +105,18 @@ const getLatestAnnouncement = async (req, res) => {
              ORDER BY created_at DESC
              LIMIT 1`
         );
+        const announcement = latest
+            ? {
+                ...latest,
+                created_at_formatted: formatDateLong(latest.created_at),
+                created_at_short: formatDateShort(latest.created_at),
+            }
+            : null;
+
         res.json({
             success: true,
             message: 'Latest announcement retrieved',
-            data: { announcement: latest || null },
+            data: { announcement },
         });
     } catch (error) {
         console.error('public getLatestAnnouncement error:', error);
@@ -116,7 +140,14 @@ const getTimetable = async (req, res) => {
              ORDER BY day ASC, start_time ASC`,
             [parsed.place]
         );
-        const items = rows.map(r => ({ ...r, day: dateToDay(parsed.place, r.day) || r.day }));
+        const items = rows.map(r => ({
+            ...r,
+            day: dateToDay(parsed.place, r.day) || r.day,
+            date_formatted: formatDateLong(r.day),
+            date_short: formatDateShort(r.day),
+            start_time_formatted: formatTime(r.start_time),
+            end_time_formatted: formatTime(r.end_time),
+        }));
 
         res.json({
             success: true,
