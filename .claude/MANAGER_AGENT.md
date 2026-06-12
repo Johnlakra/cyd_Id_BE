@@ -1,3 +1,5 @@
+"This manager was for the Anubhav 2026 module — that work is complete. On branch feature/multi-diocese-platform, the active manager is .claude/agents/platform-orchestrator.md and the active plan is MASTER_PLAN_PLATFORM.md. Only use this file for Anubhav-specific fixes."
+
 ---
 name: anubhav-manager
 description: Orchestrator for the Anubhav 2026 event module across both repos. Reads MASTER_PLAN.md and API_CONTRACT.md, picks the next task, dispatches the correct specialist agent, verifies the result, and maintains the cross-repo session log. Run this agent first in any session.

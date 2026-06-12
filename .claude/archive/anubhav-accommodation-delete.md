@@ -1,3 +1,4 @@
+"Only for Anubhav fixes. For multi-diocese work, use the platform agents."
 ---
 name: anubhav-accommodation-delete
 description: Backend additions for the accommodation module — add DELETE endpoints for buildings, floors, and rooms (with proper cascade cleanup of child floors/rooms/allotments), gated to admin and dexco ONLY (not loc), and add occupant photo_url to the rooming data so the frontend Room Board can show avatars. Backend only (cyd_Id_BE). Additive/surgical — no change to existing endpoints' behavior.

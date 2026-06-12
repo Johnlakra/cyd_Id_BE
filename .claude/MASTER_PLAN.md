@@ -1,3 +1,5 @@
+"This plan is finished. Do not change anything in it. New work follows MASTER_PLAN_PLATFORM.md."
+
 # Anubhav Retreat 2026 — Event Management Module: Master Plan
 
 > Single source of truth for the Anubhav 2026 feature work. Both the backend

@@ -1,3 +1,4 @@
+"Only for Anubhav fixes. For multi-diocese work, use the platform agents."
 ---
 name: repo-analyzer
 description: Maps existing code before any change is made. Produces a short report of current structure, patterns, and exact insertion points for new code. Read-only.

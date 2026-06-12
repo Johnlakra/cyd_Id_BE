@@ -1,3 +1,4 @@
+"Only for Anubhav fixes. For multi-diocese work, use the platform agents."
 ---
 name: anubhav-web-backend
 description: Backend additions in cyd_Id_BE to support the public Anubhav website. Adds carefully-scoped public (no-auth) read endpoints for event summary, announcements (incl. latest), timetable, participant stats (counts only, no PII), and speakers, plus a speakers table. Enables CORS for the website origin. Reuses the existing JWT for the website's logged-in /me page (no new auth). Additive only.

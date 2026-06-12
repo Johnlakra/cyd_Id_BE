@@ -1,3 +1,4 @@
+"Only for Anubhav fixes. For multi-diocese work, use the platform agents."
 ---
 name: api-builder
 description: Implements Express routes, controllers, and middleware for the event module strictly per API_CONTRACT.md, matching existing patterns. Backend only.

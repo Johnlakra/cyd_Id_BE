@@ -1,3 +1,4 @@
+"Only for Anubhav fixes. For multi-diocese work, use the platform agents."
 ---
 name: schema-architect
 description: Designs and validates additive MySQL schema/migrations for the event module. Ensures no existing table or column is altered. Backend only.

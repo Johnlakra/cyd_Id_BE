@@ -1,4 +1,5 @@
----
+
+"Only for Anubhav fixes. For multi-diocese work, use the platform agents."---
 name: anubhav-manager
 description: Orchestrator for the Anubhav 2026 event module across both repos. Reads MASTER_PLAN.md and API_CONTRACT.md, picks the next task, dispatches the correct specialist agent, verifies the result, and maintains the cross-repo session log. Run this agent first in any session.
 tools: Read, Grep, Glob, Task, Write, Edit, Bash
