@@ -236,16 +236,16 @@ CREATE TABLE event_venues (               -- generalizes Anubhav's 'place'
 
 ## 2. Phases (each = checkpoint; verify before proceeding)
 
-| Phase | Scope | Exit criteria |
-|---|---|---|
-| 0 | Baseline: run existing E2E (`scripts/anubhav-e2e.js`), snapshot key screens, record current behavior | Baseline doc committed |
-| 1 | Multi-tenancy core: dioceses, backfill, JWT claim, tenantScope, super_admin, onboarding + approval + setup wizard skeleton | New diocese can register & be approved; Jalandhar untouched (E2E green) |
-| 2 | Org structure CRUD + Excel import wizard (org + youth) | Fresh diocese imports an xlsx of youth; profiles + optional users created |
-| 3 | Permission engine + matrix UI + ui.* gating on new screens | Admin can grant/revoke any permission incl. a specific tab/button; legacy roles unchanged |
-| 4 | ID card designer + templates + gallery + Jalandhar seed templates | Designer card output pixel-matches legacy for diocese 1; new diocese designs a card end-to-end |
-| 5 | Events generalization + venues + fee/accommodation toggles + Anubhav backfill | Anubhav E2E green via events tables; new parish-scoped event w/o accommodation works |
-| 6 | QR tokens + scan desk + instant registration | Scan→registered round trip < 2s; duplicates handled |
-| 7 | Full cross-repo E2E, docs, API_CONTRACT update | All phases' checks green in one pass |
+| Phase | Scope | Exit criteria | Status |
+|---|---|---|---|
+| 0 | Baseline: run existing E2E (`scripts/anubhav-e2e.js`), snapshot key screens, record current behavior | Baseline doc committed | ✅ DONE 2026-06-12 (`ca6d5ab`) — 181/181 baseline |
+| 1 | Multi-tenancy core: dioceses, backfill, JWT claim, tenantScope, super_admin, onboarding + approval + setup wizard skeleton | New diocese can register & be approved; Jalandhar untouched (E2E green) | ✅ BE DONE 2026-06-12 (`ece5196`) — smoke 17/17, E2E 181/181 |
+| 2 | Org structure CRUD + Excel import wizard (org + youth) | Fresh diocese imports an xlsx of youth; profiles + optional users created | ✅ BE DONE 2026-06-12 (`0af53a3`) — smoke 35/35, E2E 181/181 |
+| 3 | Permission engine + matrix UI + ui.* gating on new screens | Admin can grant/revoke any permission incl. a specific tab/button; legacy roles unchanged | ✅ BE DONE 2026-06-12 (`7d4d0aa`) — smoke 38/38, E2E 181/181; matrix UI = FE repo |
+| 4 | ID card designer + templates + gallery + Jalandhar seed templates | Designer card output pixel-matches legacy for diocese 1; new diocese designs a card end-to-end | ✅ BE DONE 2026-06-12 (`df25c3b`) — smoke 28/28, E2E 181/181; designer UI = FE repo |
+| 5 | Events generalization + venues + fee/accommodation toggles + Anubhav backfill | Anubhav E2E green via events tables; new parish-scoped event w/o accommodation works | ⬜ next |
+| 6 | QR tokens + scan desk + instant registration | Scan→registered round trip < 2s; duplicates handled | ⬜ |
+| 7 | Full cross-repo E2E, docs, API_CONTRACT update | All phases' checks green in one pass | ⬜ (incl. FE halves of 1–4 and /platform, /org, /imports, /permissions, /idcard-templates contract docs) |
 
 Rules: one phase per session where possible; update `.claude/sessions/` log +
 this plan's checkboxes; `/compact` between phases; never skip the exit check.
