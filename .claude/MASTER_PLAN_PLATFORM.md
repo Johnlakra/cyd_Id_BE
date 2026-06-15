@@ -243,8 +243,8 @@ CREATE TABLE event_venues (               -- generalizes Anubhav's 'place'
 | 2 | Org structure CRUD + Excel import wizard (org + youth) | Fresh diocese imports an xlsx of youth; profiles + optional users created | ✅ BE DONE 2026-06-12 (`0af53a3`) — smoke 35/35, E2E 181/181 |
 | 3 | Permission engine + matrix UI + ui.* gating on new screens | Admin can grant/revoke any permission incl. a specific tab/button; legacy roles unchanged | ✅ BE DONE 2026-06-12 (`7d4d0aa`) — smoke 38/38, E2E 181/181; matrix UI = FE repo |
 | 4 | ID card designer + templates + gallery + Jalandhar seed templates | Designer card output pixel-matches legacy for diocese 1; new diocese designs a card end-to-end | ✅ BE DONE 2026-06-12 (`df25c3b`) — smoke 28/28, E2E 181/181; designer UI = FE repo |
-| 5 | Events generalization + venues + fee/accommodation toggles + Anubhav backfill | Anubhav E2E green via events tables; new parish-scoped event w/o accommodation works | ⬜ next |
-| 6 | QR tokens + scan desk + instant registration | Scan→registered round trip < 2s; duplicates handled | ⬜ |
+| 5 | Events generalization + venues + fee/accommodation toggles + Anubhav backfill | Anubhav E2E green via events tables; new parish-scoped event w/o accommodation works | ✅ BE DONE 2026-06-15 (`bc425da`) — smoke 37/37, E2E 181/181; anubhavRole reads venues from DB |
+| 6 | QR tokens + scan desk + instant registration | Scan→registered round trip < 2s; duplicates handled | ⬜ next |
 | 7 | Full cross-repo E2E, docs, API_CONTRACT update | All phases' checks green in one pass | ⬜ (incl. FE halves of 1–4 and /platform, /org, /imports, /permissions, /idcard-templates contract docs) |
 
 Rules: one phase per session where possible; update `.claude/sessions/` log +
