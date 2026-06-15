@@ -17,6 +17,7 @@ const orgRoutes = require('./routes/org');
 const importRoutes = require('./routes/imports');
 const permissionRoutes = require('./routes/permissions');
 const idCardTemplateRoutes = require('./routes/idCardTemplates');
+const eventsRoutes = require('./routes/events');
 
 // Initialize Express app
 const app = express();
@@ -69,6 +70,8 @@ app.use('/imports', importRoutes);
 app.use('/permissions', permissionRoutes);
 // ID card template designer (per-diocese layouts; FE falls back to legacy).
 app.use('/idcard-templates', idCardTemplateRoutes);
+// Generic events engine (Phase 5) — diocese-scoped event + venue CRUD.
+app.use('/events', eventsRoutes);
 
 // Handle 404 routes
 // app.use('*', (req, res) => {

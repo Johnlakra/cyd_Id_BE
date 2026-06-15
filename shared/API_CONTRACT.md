@@ -219,3 +219,60 @@ DELETE /anubhav/speakers/:id   -> soft delete (status=0)
 - `/anubhav/rooming` returns everything jsPDF needs (place, building, floor, room,
   occupant name/parish/phone) so PDFs need no extra calls.
 - 401 handling, token header, and `baseURL` reuse the existing `apiClient`.
+
+---
+
+## Phase 5 — Generic Events Engine (`/events`)
+
+All endpoints require `authenticateToken` + `tenantScope`. Diocese is resolved
+from the caller's JWT; super_admin may override with `?diocese_id=`.
+Anubhav 2026 is seeded as `event_id=1`, diocese 1, with 3 pre-seeded venues.
+
+Standard envelope: `{ success, data, message }`.
+
+### Events CRUD
+```
+GET    /events                         -> { events:[...], count }
+       // each row includes venue_count. super_admin may add ?diocese_id=
+POST   /events                         (permission: events.create)
+       body: { name*, scope?, scope_ref?, description?, start_date?, end_date?,
+               fee_enabled?, fee_amount?, accommodation_enabled?,
+               timetable_enabled?, speakers_enabled?, status? }
+       -> 201 { event }
+GET    /events/:id                     -> { event: { ...fields, venues:[] } }
+PUT    /events/:id                     (permission: events.manage)
+       body: any subset of POST fields
+       -> { event }
+DELETE /events/:id                     (permission: events.manage)
+       // soft delete: sets status='archived'. Returns 200 { message }.
+```
+
+### Venue management
+```
+GET    /events/:id/venues              -> { venues:[], count }
+POST   /events/:id/venues             (permission: events.manage)
+       body: { venue_key*, name?, address?, start_date?, end_date?, deaneries?:[...] }
+       -> 201 { venue }   // 409 if venue_key already exists for this event
+PUT    /events/:id/venues/:venueId    (permission: events.manage)
+       body: { venue_key?, name?, address?, start_date?, end_date?, deaneries?:[...] }
+       -> { venue }
+DELETE /events/:id/venues/:venueId   (permission: events.manage)
+       -> { message }
+```
+
+### Stats
+```
+GET    /events/:id/stats               -> { event_id, by_venue:[{ venue_key, registrations }],
+                                            total_registrations }
+       // counts from anubhav_registrations where event_id matches and status=1
+```
+
+### Event lifecycle
+`status` transitions: `draft` -> `open` -> `closed` -> `archived`.
+`DELETE /events/:id` is a soft archive (status='archived'); rows remain queryable.
+
+### Venue deanery DB source (Phase 5 upgrade)
+`middleware/anubhavRole.js` now reads `event_venues.deaneries` (JSON array) for
+place validation instead of hardcoded constants. Falls back to the hardcoded
+`PLACE_DEANERIES` map if the query returns empty or fails — Anubhav behavior
+is 100% identical with no downtime.

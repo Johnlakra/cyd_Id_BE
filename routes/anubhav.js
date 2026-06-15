@@ -6,7 +6,7 @@ const express = require('express');
 const router = express.Router();
 
 const { authenticateToken } = require('../middleware/auth');
-const { loadEventRole, requireEventRole, requireAdminOrDexco, requirePlaceAccess } = require('../middleware/anubhavRole');
+const { loadEventRole, loadEventVenues, requireEventRole, requireAdminOrDexco, requirePlaceAccess } = require('../middleware/anubhavRole');
 const roleController = require('../controllers/anubhavRoleController');
 const chaperoneController = require('../controllers/anubhavChaperoneController');
 const registrationController = require('../controllers/anubhavRegistrationController');
@@ -22,8 +22,9 @@ const speakerController = require('../controllers/anubhavSpeakerController');
 // requirePlaceAccess additionally enforces LOC -> loc_place scoping.
 const eventStaff = [requireEventRole(['loc', 'dexco']), requirePlaceAccess];
 
-// Every /anubhav route requires a logged-in user and loads their event role.
-router.use(authenticateToken, loadEventRole);
+// Every /anubhav route requires a logged-in user, loads their event role,
+// and resolves place/deanery lists from event_venues (event_id=1, fallback to hardcoded).
+router.use(authenticateToken, loadEventRole, loadEventVenues);
 
 // @route   GET /anubhav/me/role
 // @desc    Get the caller's event_role + loc_place
