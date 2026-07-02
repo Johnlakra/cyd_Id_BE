@@ -10,6 +10,7 @@ const { tenantScope } = require('../middleware/tenantScope');
 const { requirePermission } = require('../middleware/requirePermission');
 const { handleValidationErrors } = require('../middleware/validation');
 const { query, queryOne } = require('../config/database');
+const { isValidQrToken, findProfileByToken, venueAllowsDeanery } = require('../services/qrService');
 
 router.use(authenticateToken, tenantScope);
 
@@ -18,6 +19,7 @@ const idParam  = param('id').isInt({ min: 1 }).withMessage('id must be a positiv
 const vidParam = param('venueId').isInt({ min: 1 }).withMessage('venueId must be a positive integer');
 const canCreate  = requirePermission('events.create');
 const canManage  = requirePermission('events.manage');
+const canScan    = requirePermission('events.scan_register');
 
 // ── Helper: assert event belongs to caller's diocese ──────────────────────
 const loadEventForDiocese = async (eventId, dioceseId) => {
@@ -278,6 +280,131 @@ router.delete('/:id/venues/:venueId',
         } catch (err) {
             console.error('DELETE /events/:id/venues/:venueId error:', err);
             res.status(500).json({ success: false, message: 'Failed to delete venue' });
+        }
+    }
+);
+
+// ── POST /events/:id/registrations ─────────────────────────────────────────
+// Scan-desk instant registration (Phase 6, Pillar F). Accepts a scanned
+// qr_token OR an explicit profile_id (manual phone-search fallback path).
+// Duplicate scans return 409 with the original registration timestamp.
+// Writes to anubhav_registrations — the shared registration store since
+// Phase 5 backfilled it with event_id.
+router.post('/:id/registrations',
+    canScan,
+    [
+        idParam,
+        body('venue_key').trim().isLength({ min: 1, max: 40 }).withMessage('venue_key required'),
+        body('profile_id').optional().isInt({ min: 1 }),
+        handleValidationErrors,
+    ],
+    async (req, res) => {
+        try {
+            const ev = await loadEventForDiocese(req.params.id, req.dioceseId);
+            if (!ev) return res.status(404).json({ success: false, message: 'Event not found' });
+            if (ev.status !== 'open') {
+                return res.status(400).json({ success: false, message: 'Event is not open for registration' });
+            }
+
+            const { venue_key, qr_token, profile_id } = req.body;
+            if (!qr_token && !profile_id) {
+                return res.status(400).json({ success: false, message: 'qr_token or profile_id is required' });
+            }
+
+            const venue = await queryOne(
+                'SELECT * FROM event_venues WHERE event_id = ? AND venue_key = ?',
+                [ev.id, venue_key]
+            );
+            if (!venue) return res.status(404).json({ success: false, message: 'Venue not found for this event' });
+
+            let profile;
+            if (qr_token) {
+                if (!isValidQrToken(qr_token)) {
+                    return res.status(400).json({ success: false, message: 'Invalid QR token format' });
+                }
+                profile = await findProfileByToken(qr_token, req.dioceseId);
+            } else {
+                profile = await queryOne(
+                    `SELECT id, name, photo_url, parish, deanery FROM profile
+                     WHERE id = ? AND status = 1
+                       AND (diocese_id = ? OR (diocese_id IS NULL AND ? = 1))`,
+                    [profile_id, req.dioceseId, req.dioceseId]
+                );
+            }
+            if (!profile) return res.status(404).json({ success: false, message: 'Profile not found' });
+
+            if (!venueAllowsDeanery(venue, profile.deanery)) {
+                return res.status(400).json({
+                    success: false,
+                    message: `Profile's deanery '${profile.deanery}' is not assigned to venue '${venue_key}'`,
+                });
+            }
+
+            // Duplicate handling mirrors the legacy Anubhav controller:
+            // active row → 409 with timestamp; soft-deleted row → re-activate.
+            const existing = await queryOne(
+                'SELECT id, status, created_at FROM anubhav_registrations WHERE place = ? AND profile_id = ?',
+                [venue_key, profile.id]
+            );
+            if (existing && existing.status === 1) {
+                return res.status(409).json({
+                    success: false,
+                    message: 'Already registered',
+                    data: { already_registered: true, registered_at: existing.created_at },
+                });
+            }
+
+            const feeAmount = ev.fee_enabled ? ev.fee_amount : 0;
+            let registrationId;
+            if (existing) {
+                await query(
+                    `UPDATE anubhav_registrations
+                     SET status = 1, event_id = ?, fee_amount = ?, created_by = ?, created_at = NOW()
+                     WHERE id = ?`,
+                    [ev.id, feeAmount, req.user.id, existing.id]
+                );
+                registrationId = existing.id;
+            } else {
+                try {
+                    const result = await query(
+                        `INSERT INTO anubhav_registrations (place, profile_id, event_id, fee_amount, created_by)
+                         VALUES (?, ?, ?, ?, ?)`,
+                        [venue_key, profile.id, ev.id, feeAmount, req.user.id]
+                    );
+                    registrationId = result.insertId;
+                } catch (err) {
+                    if (err.code === 'ER_DUP_ENTRY') {
+                        return res.status(409).json({
+                            success: false,
+                            message: 'Already registered',
+                            data: { already_registered: true, registered_at: null },
+                        });
+                    }
+                    throw err;
+                }
+            }
+
+            const registration = await queryOne(
+                'SELECT * FROM anubhav_registrations WHERE id = ?',
+                [registrationId]
+            );
+            res.status(201).json({
+                success: true,
+                message: 'Registered',
+                data: {
+                    registration,
+                    profile: {
+                        id: profile.id,
+                        name: profile.name,
+                        photo_url: profile.photo_url,
+                        parish: profile.parish,
+                        deanery: profile.deanery,
+                    },
+                },
+            });
+        } catch (err) {
+            console.error('POST /events/:id/registrations error:', err);
+            res.status(500).json({ success: false, message: 'Failed to register' });
         }
     }
 );

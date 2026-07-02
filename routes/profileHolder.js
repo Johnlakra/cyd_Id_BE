@@ -57,6 +57,14 @@ router.get('/my-id-card', [
     requireProfileHolder
 ], profileHolderController.getMyIdCard);
 
+// @route   GET /api/profile-holder/my-qr
+// @desc    Get own QR code token + payload (CYD:<slug>:<token>)
+// @access  Private (Profile holder only)
+router.get('/my-qr', [
+    authenticateToken,
+    requireProfileHolder
+], profileHolderController.getMyQr);
+
 // @route   PUT /api/profile-holder/change-password
 // @desc    Change password
 // @access  Private (Profile holder only)

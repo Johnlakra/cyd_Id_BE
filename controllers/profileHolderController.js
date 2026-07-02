@@ -2,6 +2,7 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { query, queryOne } = require('../config/database');
 const { saveBase64Image, deleteFile, validateBase64Image } = require('../utils/fileUpload');
+const { ensureQrToken, getDioceseSlug, buildQrPayload } = require('../services/qrService');
 
 // Generate JWT token
 // diocese_id claim added for multi-diocese platform; tokens issued before this
@@ -292,10 +293,44 @@ const changePassword = async (req, res) => {
     }
 };
 
+// Get own QR code payload (Platform Phase 6). Token is generated lazily on
+// first request so profiles created after the backfill still get one.
+// Payload format: CYD:<diocese_slug>:<qr_token> — opaque, no PII.
+const getMyQr = async (req, res) => {
+    try {
+        const profile = await queryOne(
+            'SELECT id, diocese_id FROM profile WHERE profile_user_id = ? AND status = 1',
+            [req.user.id]
+        );
+        if (!profile) {
+            return res.status(404).json({
+                success: false,
+                message: 'Profile not found'
+            });
+        }
+
+        const qrToken = await ensureQrToken(profile.id);
+        const slug = await getDioceseSlug(profile.diocese_id);
+        res.json({
+            success: true,
+            message: 'QR code retrieved successfully',
+            data: { qr_token: qrToken, payload: buildQrPayload(slug, qrToken) }
+        });
+    } catch (error) {
+        console.error('Get my QR error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to retrieve QR code',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
 module.exports = {
     profileHolderLogin,
     getMyProfile,
     updateLimitedProfile,
     getMyIdCard,
-    changePassword
+    changePassword,
+    getMyQr
 };

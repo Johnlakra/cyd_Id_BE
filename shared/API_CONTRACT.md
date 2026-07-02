@@ -276,3 +276,41 @@ GET    /events/:id/stats               -> { event_id, by_venue:[{ venue_key, reg
 place validation instead of hardcoded constants. Falls back to the hardcoded
 `PLACE_DEANERIES` map if the query returns empty or fails — Anubhav behavior
 is 100% identical with no downtime.
+
+## Phase 6 — QR instant registration
+
+QR payload format: `CYD:<diocese_slug>:<qr_token>` — opaque UUID v4, no PII;
+the server verifies the token. `profile.qr_token` is backfilled for all
+existing profiles (migration 107 + `scripts/backfillQrTokens.js`); profiles
+created later get a token lazily via the `ensure` / `my-qr` endpoints.
+FE renders the QR with the `qrcode` npm lib; scanning uses `html5-qrcode`.
+
+### Scan-desk lookup (permission: events.scan_register)
+```
+GET /profiles/qr/:token                          (auth + tenantScope)
+    -> { profile: { id, name, photo_url, parish, deanery, level, designation } }
+    // 400 malformed token, 404 unknown token (tenant-scoped)
+GET /profiles/qr/:token?event_id=1&venue_key=phagwara
+    -> adds eligibility: { event_id, venue_key, event_open, deanery_allowed,
+                           already_registered, registered_at, eligible, reason }
+```
+
+### Instant registration (permission: events.scan_register)
+```
+POST /events/:id/registrations
+     body: { venue_key*, qr_token? | profile_id? }   // one of the two required
+     -> 201 { registration, profile: { id, name, photo_url, parish, deanery } }
+     // fee_amount taken from the event (fee_enabled ? fee_amount : 0)
+     // 400 event not open / deanery not assigned to venue
+     // 409 duplicate: { already_registered: true, registered_at: "2026-06-02T09:15:00.000Z" }
+     // profile_id path = manual phone-search fallback on the scan-desk screen
+```
+
+### Token provisioning
+```
+POST /profiles/qr/ensure/:profileId              (permission: idcards.generate)
+     -> { qr_token, payload }   // generates + persists the token if missing;
+                                // used by the ID card render path (qr element)
+GET  /profile-holder/my-qr                       (profile_holder role)
+     -> { qr_token, payload }   // "My QR" card on the profile-holder dashboard
+```

@@ -18,6 +18,7 @@ const importRoutes = require('./routes/imports');
 const permissionRoutes = require('./routes/permissions');
 const idCardTemplateRoutes = require('./routes/idCardTemplates');
 const eventsRoutes = require('./routes/events');
+const qrRoutes = require('./routes/qr');
 
 // Initialize Express app
 const app = express();
@@ -55,6 +56,9 @@ app.get('/health', (req, res) => {
 
 // API Routes
 app.use('/auth', authRoutes);
+// QR scan-desk routes (Phase 6). Mounted BEFORE /profiles so the legacy
+// profile router stays untouched — /profiles/qr/* is matched here first.
+app.use('/profiles/qr', qrRoutes);
 app.use('/profiles', profileRoutes);
 app.use('/profile-holder', profileHolderRoutes);
 // Public (no-auth) Anubhav website routes. Mounted BEFORE the authenticated
