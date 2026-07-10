@@ -6,7 +6,7 @@ const http = require('http');
 const { query, queryOne } = require('../config/database');
 
 const BASE = 'localhost';
-const PORT = 3000;
+const PORT = Number(process.env.SMOKE_PORT || 3000);
 
 const req = (method, path, body, token) => new Promise((res, rej) => {
   const data = body ? JSON.stringify(body) : null;

@@ -12,7 +12,7 @@ const { query, queryOne } = require('../config/database');
 const reqJson = (method, path, body, token) => new Promise((res, rej) => {
   const data = body ? JSON.stringify(body) : null;
   const r = http.request({
-    host: 'localhost', port: 3000, path, method,
+    host: 'localhost', port: Number(process.env.SMOKE_PORT || 3000), path, method,
     headers: {
       'Content-Type': 'application/json',
       ...(data ? { 'Content-Length': Buffer.byteLength(data) } : {}),
@@ -61,6 +61,11 @@ const cleanup = async () => {
 async function run() {
   console.log('=== PLATFORM PHASE 2 SMOKE TEST (org CRUD + Excel import) ===\n');
   await cleanup();
+
+  // Baseline captured up front so the "Jalandhar untouched" check below is
+  // independent of how many profiles the local DB happens to hold.
+  const jalBaseline = await queryOne(
+    'SELECT COUNT(*) c FROM profile WHERE diocese_id = 1 OR diocese_id IS NULL');
 
   // ── Setup: fresh diocese via the Phase 1 flow ────────────────────────────
   console.log('[setup] fresh diocese');
@@ -190,7 +195,8 @@ async function run() {
   // Jalandhar untouched by all of the above.
   const jalProf = await queryOne(
     'SELECT COUNT(*) c FROM profile WHERE diocese_id = 1 OR diocese_id IS NULL');
-  assert('Jalandhar profile count unchanged (2534)', jalProf?.c === 2534, jalProf?.c);
+  assert('Jalandhar profile count unchanged', jalProf?.c === jalBaseline?.c,
+    `${jalProf?.c} != baseline ${jalBaseline?.c}`);
 
   // ── Audit log ────────────────────────────────────────────────────────────
   console.log('\n[5] import_jobs audit');

@@ -11,7 +11,7 @@ const { query, queryOne } = require('../config/database');
 const reqJson = (method, path, body, token) => new Promise((res, rej) => {
   const data = body ? JSON.stringify(body) : null;
   const r = http.request({
-    host: 'localhost', port: 3000, path, method,
+    host: 'localhost', port: Number(process.env.SMOKE_PORT || 3000), path, method,
     headers: {
       'Content-Type': 'application/json',
       ...(data ? { 'Content-Length': Buffer.byteLength(data) } : {}),

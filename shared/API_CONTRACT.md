@@ -222,6 +222,104 @@ DELETE /anubhav/speakers/:id   -> soft delete (status=0)
 
 ---
 
+## Phase 1 — Multi-tenancy platform (`/platform`)
+
+```
+POST /platform/dioceses/register              (PUBLIC, rate limited)
+     body: { name*, contact_email*, contact_phone*, address?, logo_url? }
+     -> 201 { id, name, slug, status: 'pending' }
+GET  /platform/dioceses?status=pending        (super_admin)
+     -> { dioceses:[] }
+PUT  /platform/dioceses/:id/approve           (super_admin)
+     -> { id, slug, status: 'active',
+          admin: { username, created, password_hint } }
+     // diocese admin auto-created (username convention; password = contact phone)
+PUT  /platform/dioceses/:id/suspend           (super_admin; diocese 1 protected)
+     -> { id, status: 'suspended' }
+```
+JWT carries a `diocese_id` claim; tokens issued before Phase 1 resolve to
+diocese 1 (Jalandhar). `GET /auth/me/permissions` returns the caller's flat
+permission-key list for FE gating (`usePermissions()` / `<Can>`).
+
+## Phase 2 — Org structure + Excel import (`/org`, `/imports`)
+
+All routes: auth + tenantScope. `/org/*` needs `org.manage`; `/imports/*`
+needs `imports.run`.
+
+```
+GET    /org/structure                  -> { deaneries:[{ id, name, parishes:[] }] }
+POST   /org/deaneries                  body { name* }         -> 201 { id, name }
+PUT    /org/deaneries/:id              body { name* }         -> { id, name }
+DELETE /org/deaneries/:id              -> { id }        // blocked if parishes exist
+POST   /org/parishes                   body { name*, deanery_id* } -> 201 { id, name, deanery_id }
+PUT    /org/parishes/:id               body { name* }         -> { id, name }
+DELETE /org/parishes/:id               -> { id }
+
+GET  /imports/template?type=youth|org  -> { file_name, file_base64 }  // .xlsx
+GET  /imports/jobs                     -> { jobs:[] }         // import audit log
+POST /imports/parse                    body { file_base64* }  // wizard steps 1-2
+     -> { headers, total_rows, sample_rows, suggested_mapping,
+          unmapped_required, unmatched_headers }
+POST /imports/youth/validate           body { file_base64*, mapping, defaults? }
+     -> { total_rows, valid_rows, invalid_rows, preview,
+          errors:[{ row_number, errors:[] }] }                // dry run
+POST /imports/youth/commit             body { file_base64*, mapping, defaults?,
+                                              create_users? }
+     -> 201 { total_rows, inserted_rows, failed_rows, users_created,
+              credentials, errors, error_file_base64 }        // one transaction
+POST /imports/org/commit               body { file_base64*, mapping }
+     -> { total_rows, deaneries_created, parishes_created, ... }
+```
+
+## Phase 3 — Permission engine (`/permissions`)
+
+All routes: auth + admin + tenantScope. Resolution order: super_admin → all;
+diocese admin → all within diocese; else union(role perms) + per-user
+overrides, `deny` wins. Keys are `resource.action` (API) and `ui.*` (tabs/buttons).
+
+```
+GET    /permissions/catalog                    -> { modules }   // perms grouped by module
+GET    /permissions/matrix                     -> { permissions, roles, grid }
+GET    /permissions/roles                      -> { roles:[{ ..., permissions:[keys] }] }
+POST   /permissions/roles                      body { role_key*, label* }
+       -> 201 { id, role_key, label, is_system: 0, permissions: [] }
+PUT    /permissions/roles/:id/permissions      body { perm_keys:[..] } -> { id, permissions }
+POST   /permissions/roles/:id/duplicate        body { role_key*, label? } -> 201 { id, role_key, label }
+DELETE /permissions/roles/:id                  -> { id }        // is_system roles blocked
+GET    /permissions/users/:userId
+       -> { user: { id, username, role }, roles, overrides,
+            effective_permissions:[keys] }
+POST   /permissions/users/:userId/roles        body { role_id*, scope_type?, scope_ref? }
+       -> { user_id, role_id, scope_type, scope_ref }
+DELETE /permissions/users/:userId/roles/:roleId -> { user_id, role_id }
+PUT    /permissions/users/:userId/overrides    body { perm_key*, effect: allow|deny|null }
+       -> { perm_key, effect }   // effect null clears the override
+```
+
+## Phase 4 — ID card template designer (`/idcard-templates`)
+
+All routes: auth + tenantScope; writes need `idcards.design`.
+
+```
+GET    /idcard-templates                       -> { templates:[] }
+GET    /idcard-templates/gallery               -> { card: { width_mm, height_mm },
+                                                    templates:[] }  // seeded starters
+GET    /idcard-templates/resolve?level=parish  -> { template | null }
+       // default template for (diocese, level); FE falls back to legacy render
+GET    /idcard-templates/:id                   -> { template }
+POST   /idcard-templates                       body { level*, name*, background_url*,
+                                                      width_mm?, height_mm?, layout_json* }
+       -> 201 { template }
+PUT    /idcard-templates/:id                   -> { template }
+PUT    /idcard-templates/:id/default           -> { id, level }  // one default per level
+POST   /idcard-templates/:id/duplicate         -> 201 { template }
+DELETE /idcard-templates/:id                   -> { message }    // soft (status=0)
+```
+`layout_json.elements[]`: `{ id, type: text|photo|qr|logo|static_text|line,
+field?, x, y, w, h (mm), fontFamily?, fontSize?, fontWeight?, color?, align?,
+rotation?, borderRadius?, border?, label?, uppercase? }`. The `qr` element
+renders the profile's `CYD:<slug>:<qr_token>` payload (see Phase 6).
+
 ## Phase 5 — Generic Events Engine (`/events`)
 
 All endpoints require `authenticateToken` + `tenantScope`. Diocese is resolved
