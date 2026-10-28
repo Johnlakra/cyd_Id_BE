@@ -10,6 +10,11 @@ const { ensureUploadDir } = require('./utils/fileUpload');
 const authRoutes = require('./routes/auth');
 const profileRoutes = require('./routes/profile');
 const profileHolderRoutes = require('./routes/profileHolder');
+const shopRoutes = require('./routes/shopRoutes');
+const productRoutes = require('./routes/productRoutes');
+const addressRoutes = require('./routes/addressRoutes');
+const orderRoutes = require('./routes/orderRoutes');
+const paymentRoutes = require('./routes/paymentRoutes');
 
 // Initialize Express app
 const app = express();
@@ -17,7 +22,13 @@ const PORT = process.env.PORT || 3000;
 
 // Middleware
 app.use(cors());
-app.use(express.json({ limit: '10mb' })); // Increased limit for base64 images
+// `verify` stashes the raw request bytes on req.rawBody before JSON-parsing them. The YouPI-PG
+// webhook (routes/paymentRoutes.js) needs those exact raw bytes to check its HMAC signature -
+// computing the hash over a re-serialized/parsed body would not match what YouPI signed.
+app.use(express.json({
+    limit: '10mb',
+    verify: (req, _res, buf) => { req.rawBody = buf; },
+})); // Increased limit for base64 images
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // Serve static files (uploaded images)
@@ -44,6 +55,11 @@ app.get('/health', (req, res) => {
 app.use('/auth', authRoutes);
 app.use('/profiles', profileRoutes);
 app.use('/profile-holder', profileHolderRoutes);
+app.use('/shop', shopRoutes);
+app.use('/shop/products', productRoutes);
+app.use('/shop/addresses', addressRoutes);
+app.use('/shop/orders', orderRoutes);
+app.use('/shop/payments', paymentRoutes);
 
 // Handle 404 routes
 // app.use('*', (req, res) => {

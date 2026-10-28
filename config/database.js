@@ -46,6 +46,33 @@ const queryOne = async (sql, params = []) => {
     return results[0] || null;
 };
 
+// Run a set of queries atomically. `callback` receives a connection whose `query`/`queryOne`
+// use that single connection (not the pool), so all statements share one transaction.
+const withTransaction = async (callback) => {
+    const connection = await pool.getConnection();
+    try {
+        await connection.beginTransaction();
+
+        const txQuery = async (sql, params = []) => {
+            const [results] = await connection.execute(sql, params);
+            return results;
+        };
+        const txQueryOne = async (sql, params = []) => {
+            const results = await txQuery(sql, params);
+            return results[0] || null;
+        };
+
+        const result = await callback({ query: txQuery, queryOne: txQueryOne });
+        await connection.commit();
+        return result;
+    } catch (error) {
+        await connection.rollback();
+        throw error;
+    } finally {
+        connection.release();
+    }
+};
+
 // Database initialization SQL - removed since we're doing it programmatically now
 
 // Initialize database tables
@@ -137,6 +164,7 @@ module.exports = {
     pool,
     query,
     queryOne,
+    withTransaction,
     testConnection,
     initDatabase
 };
