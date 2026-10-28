@@ -75,7 +75,12 @@ node scripts/initShopDatabase.js
 
 Safe to re-run — every `CREATE TABLE` is `IF NOT EXISTS`, every index is checked against
 `information_schema.statistics` first, and default categories are only seeded if the table is
-empty. This also seeds a starter category list (devotional items, books/booklets, apparel,
+empty. The `shops` table additionally self-heals: if a table named `shops` already existed in
+the database from something unrelated (`CREATE TABLE IF NOT EXISTS` silently no-ops against it,
+columns and all), `initShopTables()` adds any missing column via `ensureColumn()`/
+`healShopsTable()` without touching existing rows. This was a real failure mode on first
+rollout — see `⚠️ Could not create index idx_shops_owner: Key column 'owner_user_id' doesn't
+exist` in the logs if you ever see it again elsewhere. This also seeds a starter category list (devotional items, books/booklets, apparel,
 event tickets, handmade/crafts, food, other) — edit `DEFAULT_CATEGORIES` in
 `config/shopDatabase.js` before first run if the diocese wants different starting categories.
 

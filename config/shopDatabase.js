@@ -12,6 +12,52 @@
 //   multi-seller carts), so each shop only ever sees and manages its own orders.
 const { query, queryOne } = require('./database');
 
+// `CREATE TABLE IF NOT EXISTS` silently does nothing if a table by that name already exists -
+// even with completely different columns (e.g. a stray/leftover `shops` table from an unrelated
+// earlier experiment in a shared dev database). That leaves the table present but broken, and
+// every later `CREATE INDEX`/query against it fails. This adds any column this module expects
+// that isn't already there, without touching whatever rows (if any) already exist. Added
+// columns are nullable rather than matching the strict NOT NULL/UNIQUE of a fresh install -
+// this is a repair path for an anomalous table, not the canonical schema (new installs get the
+// full CREATE TABLE above untouched).
+const ensureColumn = async (tableName, columnName, definition) => {
+    try {
+        const existing = await queryOne(`
+            SELECT COUNT(*) as count
+            FROM information_schema.columns
+            WHERE table_schema = ?
+            AND table_name = ?
+            AND column_name = ?
+        `, [process.env.DB_NAME, tableName, columnName]);
+
+        if (existing.count === 0) {
+            await query(`ALTER TABLE ${tableName} ADD COLUMN ${definition}`);
+            console.log(`✅ Added missing column: ${tableName}.${columnName}`);
+        }
+    } catch (error) {
+        console.log(`⚠️  Could not add column ${tableName}.${columnName}:`, error.message);
+    }
+};
+
+const healShopsTable = async () => {
+    await ensureColumn('shops', 'owner_user_id', 'owner_user_id INT NULL');
+    await ensureColumn('shops', 'name', 'name VARCHAR(150) NULL');
+    await ensureColumn('shops', 'slug', 'slug VARCHAR(170) NULL');
+    await ensureColumn('shops', 'description', 'description TEXT NULL');
+    await ensureColumn('shops', 'logo_url', 'logo_url VARCHAR(255) NULL');
+    await ensureColumn('shops', 'banner_url', 'banner_url VARCHAR(255) NULL');
+    await ensureColumn('shops', 'parish', 'parish VARCHAR(100) NULL');
+    await ensureColumn('shops', 'deanery', 'deanery VARCHAR(100) NULL');
+    await ensureColumn('shops', 'contact_phone', 'contact_phone VARCHAR(20) NULL');
+    await ensureColumn('shops', 'upi_id', 'upi_id VARCHAR(100) NULL');
+    await ensureColumn('shops', 'status', "status ENUM('pending', 'approved', 'rejected', 'suspended') DEFAULT 'pending'");
+    await ensureColumn('shops', 'rejection_reason', 'rejection_reason TEXT NULL');
+    await ensureColumn('shops', 'reviewed_by', 'reviewed_by INT NULL');
+    await ensureColumn('shops', 'reviewed_at', 'reviewed_at TIMESTAMP NULL');
+    await ensureColumn('shops', 'created_at', 'created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP');
+    await ensureColumn('shops', 'updated_at', 'updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP');
+};
+
 const createIndexSafely = async (indexName, tableName, columns) => {
     try {
         const existingIndex = await queryOne(`
@@ -58,6 +104,7 @@ const initShopTables = async () => {
             FOREIGN KEY (reviewed_by) REFERENCES users(id)
         )
     `);
+    await healShopsTable();
 
     console.log('Creating shop_categories table...');
     await query(`
