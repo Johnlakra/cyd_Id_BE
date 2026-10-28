@@ -1,5 +1,13 @@
 # CYD ID Card Management System - Backend API
 
+## 🛍️ Shop Module
+
+This branch adds a multi-vendor marketplace (Shop module). See
+[`docs/SHOP_MODULE.md`](docs/SHOP_MODULE.md) for architecture and the full API reference, and
+[`docs/PAYMENTS.md`](docs/PAYMENTS.md) for important risk notes on the UPI payment integration
+before relying on it. Run `node scripts/initShopDatabase.js` after the base migration below to
+create its tables.
+
 ## 🚨 CRITICAL: Database Migration Required for Existing Data
 
 **IMPORTANT**: there are existing profile data in our database, need to create user accounts for all existing profiles to enable the profile holder login system.
