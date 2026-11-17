@@ -8,6 +8,9 @@ This branch adds a multi-vendor marketplace (Shop module). See
 before relying on it. Run `node scripts/initShopDatabase.js` after the base migration below to
 create its tables.
 
+**Known flaws and the fix plan:** [`docs/IMPROVEMENT_PLAN.md`](docs/IMPROVEMENT_PLAN.md). This
+includes a critical pre-existing issue: `POST /auth/register` lets anyone create an admin account.
+
 ## 🚨 CRITICAL: Database Migration Required for Existing Data
 
 **IMPORTANT**: there are existing profile data in our database, need to create user accounts for all existing profiles to enable the profile holder login system.

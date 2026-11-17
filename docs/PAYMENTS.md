@@ -1,5 +1,13 @@
 # Payment Integration — Risk Notes & How to Swap Gateways
 
+> ⚠️ **Superseded in part (2026-11-17).** An audit against YouPI-PG's real source found that the
+> adapter described below does not work: it never creates the payment server-side, it ignores
+> webhook `event`/`settlementState` (a signed `EXPIRED` webhook marked an order paid), and its
+> env vars and field names are wrong. YouPI-PG's README also prohibits collecting payments for
+> unrelated merchants, which is what a multi-vendor marketplace does. **Read
+> [`IMPROVEMENT_PLAN.md` §5](IMPROVEMENT_PLAN.md#5-phase-1--payments-the-decision-comes-first)
+> before using or changing anything here.**
+
 ## The honest summary
 
 The Shop module's default payment gateway is
