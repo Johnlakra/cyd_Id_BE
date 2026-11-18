@@ -25,9 +25,9 @@ and means "do I own a shop" is simply "is there an approved row in `shops` with
 
 ## Key design decision: one order per shop
 
-A customer's cart can span multiple shops. At checkout, the frontend splits the cart by
-`shop_id` and calls `POST /shop/orders` once per shop — so a `shop_orders` row always belongs to
-exactly one shop, exactly one customer, one address, one payment. This is the same pattern
+A customer's cart can span multiple shops. `POST /shop/checkout` takes the whole cart and, in one
+transaction, creates one order per shop. A `shop_orders` row therefore always belongs to exactly
+one shop, one customer, one address and one payment. This is the same pattern
 Amazon/Meesho/Flipkart use for multi-seller carts, and it keeps every other piece of the system
 (fulfillment state machine, a shop owner's "my orders" view, payment reconciliation) simple:
 one order, one shop, no splitting logic anywhere else.
@@ -40,21 +40,30 @@ Floating-point rupees are never stored or compared. The only place rupees (not p
   `utils/shopHelpers.js#rupeesToPaise`)
 - the frontend's display layer (`(value_paise / 100).toFixed(2)`)
 
-## Key design decision: pluggable payment gateway, YouPI-PG as the default
+## Key design decision: peer-to-peer UPI, the platform never holds money
 
-See [`PAYMENTS.md`](./PAYMENTS.md) for the full picture, including the risk this carries.
-In short: `services/payments/index.js#getGateway()` is the only way controllers reach a
-gateway implementation. The default (`PAYMENT_GATEWAY=youpi`) is
-[YouPI-PG](https://github.com/youpi-pg/YouPI-PG), which is **not** a certified/bank-backed
-gateway — read `PAYMENTS.md` before trusting this with money that matters. A `cod`
-(cash-on-delivery) gateway is also implemented and needs no external service at all.
+Buyers pay each seller's own UPI ID directly and submit the 12-digit UTR. The seller confirms the
+money arrived, and admins resolve disputes. Placing an order reserves its stock (the "escrow").
+Cash on delivery is available per shop. See [`PAYMENTS.md`](./PAYMENTS.md) for the flow, timers,
+dispute rules and why this replaced the earlier YouPI-PG gateway.
+
+## Key design decision: one place changes order state
+
+`services/orderLifecycle.js` is the only code that changes an order's `status` or
+`payment_status`. Every transition:
+- locks the order row;
+- re-checks the state, then updates conditionally on the expected state;
+- returns stock at most once (`stock_released_at`);
+- writes a system chat message and an `audit_log` row.
+
+`services/orderQueries.js` builds what each viewer sees, including the `allowed_actions` the
+frontend renders buttons from.
 
 ## Database schema
 
-See `config/shopDatabase.js` for the authoritative `CREATE TABLE` statements (idempotent,
-following the same `CREATE TABLE IF NOT EXISTS` + `createIndexSafely` style as the base app's
-`config/database.js` — no ORM, no migration framework, by design, to match the rest of this
-small codebase).
+The baseline tables are in `config/shopDatabase.js` (idempotent `CREATE TABLE IF NOT EXISTS`).
+Later changes are numbered migrations in `migrations/`, applied by `scripts/migrate.js` and
+recorded in `schema_migrations`. `npm start` runs migrations before starting the server.
 
 | Table | Purpose |
 |---|---|
@@ -63,14 +72,19 @@ small codebase).
 | `shop_products` | Catalog items, always under a shop, `price_paise` + `stock_quantity`. |
 | `shop_product_images` | Up to a handful of images per product, Cloudinary URLs. |
 | `shop_addresses` | Customer delivery addresses (reusable across orders). |
-| `shop_orders` | One order = one shop + one customer + one address + one payment method. |
+| `shop_orders` | One order = one shop + one customer + one payment method. Stores copies of the delivery address (`ship_*`) and the seller's UPI ID (`payee_*`), plus the P2P deadlines (`pay_by`, `confirm_by`). |
 | `shop_order_items` | Line items, with a `product_title_snapshot` so renaming a product later doesn't rewrite order history. |
-| `shop_payments` | One or more payment attempts per order; `delivery_id` is `UNIQUE` for webhook idempotency. |
+| `shop_checkouts` | One row per checkout attempt; `UNIQUE(user_id, idempotency_key)` makes a double submit return the same orders. |
+| `shop_payment_claims` | The buyer's UTR (globally `UNIQUE`) and, later, the seller's refund UTR. |
+| `shop_disputes` | Disputes with reason, origin state and admin resolution; one open dispute per order. |
+| `shop_order_messages` | Per-order buyer–seller chat, including system messages. |
+| `shop_order_evidence` | Private payment/refund screenshots (Cloudinary `authenticated`). |
+| `audit_log` | Who did what to orders and shops, and when. |
 
 ### Running the migration
 
 ```bash
-node scripts/initShopDatabase.js
+npm run init-shop-db     # same as: npm run migrate
 ```
 
 Safe to re-run — every `CREATE TABLE` is `IF NOT EXISTS`, every index is checked against
@@ -87,17 +101,17 @@ event tickets, handmade/crafts, food, other) — edit `DEFAULT_CATEGORIES` in
 ## Order status state machine
 
 ```
-pending_payment ──(payment OR cod)──▶ placed ──▶ accepted ──▶ packed ──▶ shipped ──▶ delivered
-                                         │            │
-                                         ▼            ▼
-                                     cancelled     rejected
-                                   (customer,    (shop owner,
-                                  before shop     either stage)
-                                     accepts)
+pending_payment ──(seller confirms UPI, or COD)──▶ placed ──▶ accepted ──▶ packed ──▶ shipped ──▶ delivered
+       │                                             │            │
+       ▼                                             ▼            ▼
+   cancelled                                      rejected     rejected
+ (buyer before paying, expiry,                  (seller; refund due if paid)
+  suspension, or dispute)
 ```
 
-Enforced server-side in `controllers/orderController.js`'s `ALLOWED_TRANSITIONS` map — the API
-will reject any status update that isn't a listed transition from the order's current status.
+Fulfilment transitions are enforced by `ALLOWED_FULFILMENT` in `services/orderLifecycle.js` and
+are only allowed once the payment is `confirmed` (or for COD). The payment states and dispute
+rules are in [`PAYMENTS.md`](./PAYMENTS.md).
 
 ## API reference
 
@@ -138,22 +152,17 @@ noted. All responses are `{ success, message, data }` on success or
 | GET/POST | `/shop/addresses` | the caller's own addresses |
 | PUT/DELETE | `/shop/addresses/:id` | the caller's own address only |
 
-### Orders
-| Method | Path | Access |
-|---|---|---|
-| POST | `/shop/orders` | customer places an order for one shop's items |
-| GET | `/shop/orders` | customer's own order history |
-| GET | `/shop/orders/shop` | shop owner's incoming orders (requires approved shop) |
-| GET | `/shop/orders/:id` | the customer, the owning shop owner, or admin |
-| PUT | `/shop/orders/:id/status` | shop owner, within `ALLOWED_TRANSITIONS` |
-| PUT | `/shop/orders/:id/cancel` | customer, only while `pending_payment`/`placed` |
+### Checkout, orders and payments
 
-### Payments
+The full list (checkout, payment claim/confirm/refund, disputes, chat, evidence, admin disputes)
+is in [`PAYMENTS.md` → API](./PAYMENTS.md#api). The main entry points:
+
 | Method | Path | Access |
 |---|---|---|
-| POST | `/shop/payments/initiate` | customer — returns YouPI checkout params |
-| GET | `/shop/payments/:orderId/status` | customer or admin — poll while waiting |
-| POST | `/shop/payments/webhook/youpi` | **the YouPI-PG server**, not a browser — HMAC-signed, no JWT |
+| POST | `/shop/checkout` | buyer: whole cart, needs an `Idempotency-Key` header |
+| POST | `/shop/products/lookup` | any logged-in user: current price/stock for a cart |
+| GET | `/shop/orders` · `/shop/orders/shop` | buyer's orders · seller's orders (approved or suspended shop) |
+| GET | `/shop/orders/:id` | buyer, seller or admin; includes `allowed_actions` for the viewer |
 
 ## Frontend structure
 
@@ -165,10 +174,10 @@ state (this app has no react-router anywhere, by design — don't introduce one 
 
 ## Known gaps / deliberately out of scope for this first build
 
-- No payout/settlement automation — a shop owner's `upi_id` is captured for reference, but
-  actually paying shop owners out is a manual, offline process for now.
+- No notifications (WhatsApp/SMS/email). Sellers see an action badge in the app, but nothing
+  pings them, and the 24-hour confirm window relies on sellers noticing. This is the most
+  valuable next addition.
 - No reviews/ratings.
-- No shipping cost calculation — `shipping_paise` exists in the schema but is always `0`;
-  shop owners are expected to arrange local pickup/delivery within the diocese community.
-- No multi-shop single-payment checkout — a cart spanning shops creates one order (and one
-  payment) per shop, not one combined payment.
+- No shipping cost calculation. `shipping_paise` exists in the schema but is always `0`, and
+  shop owners arrange local pickup/delivery within the diocese community.
+- A cart spanning shops creates one order (and one UPI payment) per shop, because each seller is paid directly.

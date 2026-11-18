@@ -11,6 +11,23 @@ Audit date: 2026-11-17.
 
 ---
 
+## Fix status (updated 2026-11-18)
+
+| Findings | Status | Where |
+|---|---|---|
+| S-01, S-03, S-05, S-06 | ✅ Fixed | Hotfix PR to `main`: [Johnlakra/cyd_Id_BE#2](https://github.com/Johnlakra/cyd_Id_BE/pull/2) (also merged into the shop branch) |
+| S-02 | ⚠️ Needs the owner | Rotate the production `admin` password and check for unknown admin accounts (steps in PR #2) |
+| S-04 | Open | Guessable profile-holder credentials |
+| YP-01 … YP-08, BE-06 | Superseded | YouPI-PG and webhooks removed; peer-to-peer model chosen (§5.3) |
+| BE-01, BE-02, BE-03, BE-04, BE-05, BE-07, BE-08, BE-09, BE-10, BE-11, BE-12, BE-14 | ✅ Fixed | Backend commit `4622bd8`, each covered by tests in `tests/` |
+| BE-13 | Partly | Listings and lookup expose `in_stock`/`available`; status isn't flipped to `out_of_stock` automatically |
+| BE-19, BE-20, BE-25 | ✅ Fixed | Blank UPI accepted; base64 upload log removed; versioned migrations (`scripts/migrate.js`) |
+| BE-24 | Partly | A reason is required to reject or suspend a shop, and there's an `audit_log`; no notifications yet |
+| C-01, C-02, C-03, C-06, C-08, C-09 | ✅ Fixed (backend) | `GET /shop/config`, `accepts_upi`, product visibility, address snapshot, refunds, expiry |
+| Engineering: tests + CI | ✅ Backend | 62 jest/supertest tests, passing on MariaDB 10.11 and MySQL 8.0; GitHub Actions workflow |
+| FE-* | See the frontend PR | [Johnlakra/CYD_ID#2](https://github.com/Johnlakra/CYD_ID/pull/2) |
+| Everything else | Open | As listed below |
+
 ## 0. TL;DR
 
 1. **Security emergency on `main` (pre-existing, not shop code):** anyone on the internet can
@@ -198,7 +215,16 @@ These affect the live ID-card system today, independent of the shop.
 | YP-07 | HIGH | source | Legal/architecture: single receiving account versus the README's prohibition on collecting for unrelated merchants, plus a commercial licence. | See §5.3. Needs an owner decision, possibly with legal or financial advice. |
 | YP-08 | MED | REVIEW | `PAYMENT_GATEWAY=cod` doesn't disable UPI, because `paymentController.js` ~29 and ~82 hardcode `getGateway('youpi')`, and the UI always offers UPI (C-02). | Use `getGateway()` from config, and add `GET /shop/config` returning `{paymentMethods:[...]}` that the UI reads. |
 
-### 5.3 Decision required — payment model
+### 5.3 Decision — payment model
+
+> **Decided 2026-11-18: option A (peer-to-peer).** Buyers pay the seller's UPI ID directly, the
+> seller confirms, admins resolve disputes, and an in-app order chat connects the two. YouPI-PG
+> was removed. Implemented in backend commit `4622bd8`; the rules are in
+> [`PAYMENTS.md`](PAYMENTS.md). Owner decisions:
+> - pay window 30 min;
+> - seller confirms within 24 h, never auto-confirm;
+> - UTR required, screenshot optional (required when the buyer disputes);
+> - chat only, no phone numbers shared.
 
 | Option | How it works | Pros | Cons |
 |---|---|---|---|
@@ -313,6 +339,8 @@ New data for option A: on `shop_payments` add `payer_utr` (customer-entered), `c
 ---
 
 ## 9. Documentation that is now wrong
+
+> ✅ **Done (2026-11-18):** every file below has been updated for the peer-to-peer model.
 
 | File | Problem | Fix |
 |---|---|---|
