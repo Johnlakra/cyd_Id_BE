@@ -16,7 +16,8 @@ const shopRoutes = require('./routes/shopRoutes');
 const productRoutes = require('./routes/productRoutes');
 const addressRoutes = require('./routes/addressRoutes');
 const orderRoutes = require('./routes/orderRoutes');
-const paymentRoutes = require('./routes/paymentRoutes');
+const checkoutRoutes = require('./routes/checkoutRoutes');
+const { sweep } = require('./services/orderLifecycle');
 
 // Initialize Express app
 const app = express();
@@ -58,10 +59,10 @@ app.use('/auth', authRoutes);
 app.use('/profiles', profileRoutes);
 app.use('/profile-holder', profileHolderRoutes);
 app.use('/shop', shopRoutes);
+app.use('/shop', checkoutRoutes);
 app.use('/shop/products', productRoutes);
 app.use('/shop/addresses', addressRoutes);
 app.use('/shop/orders', orderRoutes);
-app.use('/shop/payments', paymentRoutes);
 
 // Handle 404 routes
 // app.use('*', (req, res) => {
@@ -86,11 +87,21 @@ app.use('/shop/payments', paymentRoutes);
 // JSON response instead of Express's HTML stack-trace page.
 app.use(jsonErrorHandler);
 
-// Start server
-app.listen(PORT, () => {
-            console.log(`✅ Server is running on port ${PORT}`);
-            console.log('\n🎉 Server started successfully!\n');
-        })
+// Start the server only when run directly (`node server.js`). Tests and serverless hosts import
+// `app` instead.
+if (require.main === module) {
+    app.listen(PORT, () => {
+        console.log(`✅ Server is running on port ${PORT}`);
+        console.log('\n🎉 Server started successfully!\n');
+    });
+
+    // Cancel unpaid orders past their payment window and auto-resolve stale disputes.
+    setInterval(() => {
+        sweep().catch((error) => console.error('Order sweep failed:', error.message));
+    }, 60 * 1000).unref();
+}
+
+module.exports = app;
 // const startServer = async () => {
 //     try {
 //         console.log('🚀 Starting Profile Management API...');

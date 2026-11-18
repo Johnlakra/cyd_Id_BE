@@ -1,7 +1,9 @@
 // controllers/shopController.js - Shop registration, management, and marketplace browsing
+const bcrypt = require('bcryptjs');
 const { query, queryOne } = require('../config/database');
 const { uniqueSlug } = require('../utils/shopHelpers');
 const { saveBase64Image } = require('../utils/fileUpload');
+const { voidAwaitingOrdersForShop } = require('../services/orderLifecycle');
 
 // POST /shop/shops/apply - any authenticated user applies to become a shop owner
 const applyForShop = async (req, res) => {
@@ -22,11 +24,20 @@ const applyForShop = async (req, res) => {
             logoUrl = await saveBase64Image(logo);
         }
 
-        const result = await query(
-            `INSERT INTO shops (owner_user_id, name, slug, description, parish, deanery, contact_phone, upi_id, logo_url, status)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`,
-            [req.user.id, name, slug, description || null, parish || null, deanery || null, contact_phone, upi_id || null, logoUrl]
-        );
+        let result;
+        try {
+            result = await query(
+                `INSERT INTO shops (owner_user_id, name, slug, description, parish, deanery, contact_phone, upi_id, logo_url, status)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`,
+                [req.user.id, name, slug, description || null, parish || null, deanery || null, contact_phone, upi_id || null, logoUrl]
+            );
+        } catch (error) {
+            // Two simultaneous applications from one user: the UNIQUE(owner_user_id) index lets one through.
+            if (error.code === 'ER_DUP_ENTRY') {
+                return res.status(400).json({ success: false, message: 'You already have a shop application.' });
+            }
+            throw error;
+        }
 
         const shop = await queryOne('SELECT * FROM shops WHERE id = ?', [result.insertId]);
 
@@ -61,7 +72,7 @@ const updateMyShop = async (req, res) => {
             return res.status(404).json({ success: false, message: 'You do not have a shop yet' });
         }
 
-        const { name, description, parish, deanery, contact_phone, upi_id, logo, banner } = req.body;
+        const { name, description, parish, deanery, contact_phone, upi_id, current_password, logo, banner } = req.body;
         const updates = [];
         const values = [];
 
@@ -70,7 +81,24 @@ const updateMyShop = async (req, res) => {
         if (parish !== undefined) { updates.push('parish = ?'); values.push(parish); }
         if (deanery !== undefined) { updates.push('deanery = ?'); values.push(deanery); }
         if (contact_phone) { updates.push('contact_phone = ?'); values.push(contact_phone); }
-        if (upi_id !== undefined) { updates.push('upi_id = ?'); values.push(upi_id); }
+
+        // Buyers send money straight to this UPI ID, so changing it needs the account password: a
+        // stolen session alone must not be able to redirect payments. Orders already placed keep
+        // the UPI ID that was shown when they were placed.
+        let upiChanged = false;
+        if (upi_id !== undefined) {
+            const newUpi = upi_id ? String(upi_id).trim() : null;
+            if (newUpi !== (shop.upi_id || null)) {
+                const owner = await queryOne('SELECT password FROM users WHERE id = ?', [req.user.id]);
+                const passwordOk = current_password && owner && (await bcrypt.compare(String(current_password), owner.password));
+                if (!passwordOk) {
+                    return res.status(403).json({ success: false, message: 'Enter your current password to change the UPI ID' });
+                }
+                updates.push('upi_id = ?', 'upi_id_changed_at = NOW()');
+                values.push(newUpi);
+                upiChanged = true;
+            }
+        }
 
         if (logo) {
             const logoUrl = await saveBase64Image(logo);
@@ -89,6 +117,13 @@ const updateMyShop = async (req, res) => {
 
         values.push(shop.id);
         await query(`UPDATE shops SET ${updates.join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, values);
+        if (upiChanged) {
+            await query("INSERT INTO audit_log (actor_user_id, action, entity, entity_id, data) VALUES (?, 'shop.upi_changed', 'shop', ?, ?)", [
+                req.user.id,
+                shop.id,
+                JSON.stringify({ from: shop.upi_id || null, to: upi_id ? String(upi_id).trim() : null }),
+            ]);
+        }
 
         const updated = await queryOne('SELECT * FROM shops WHERE id = ?', [shop.id]);
         res.json({ success: true, message: 'Shop updated successfully', data: { shop: updated } });
@@ -216,11 +251,23 @@ const adminReviewShop = async (req, res) => {
 
         await query(
             `UPDATE shops SET status = ?, rejection_reason = ?, reviewed_by = ?, reviewed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
-            [status, status === 'rejected' ? (rejection_reason || null) : null, req.user.id, req.params.id]
+            [status, ['rejected', 'suspended'].includes(status) ? (rejection_reason || null) : null, req.user.id, req.params.id]
         );
+        await query("INSERT INTO audit_log (actor_user_id, action, entity, entity_id, data) VALUES (?, 'shop.reviewed', 'shop', ?, ?)", [
+            req.user.id,
+            shop.id,
+            JSON.stringify({ from: shop.status, to: status, reason: rejection_reason || null }),
+        ]);
+
+        // A suspended shop keeps fulfilling and refunding orders it already has, but unpaid orders
+        // are cancelled so nobody sends money to it.
+        let cancelledOrders = 0;
+        if (status === 'suspended') {
+            cancelledOrders = await voidAwaitingOrdersForShop(shop.id, req.user.id);
+        }
 
         const updated = await queryOne('SELECT * FROM shops WHERE id = ?', [req.params.id]);
-        res.json({ success: true, message: `Shop ${status}`, data: { shop: updated } });
+        res.json({ success: true, message: `Shop ${status}`, data: { shop: updated, cancelled_unpaid_orders: cancelledOrders } });
     } catch (error) {
         console.error('adminReviewShop error:', error);
         res.status(500).json({ success: false, message: 'Failed to review shop' });

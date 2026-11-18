@@ -2,6 +2,7 @@
 const { query, queryOne } = require('../config/database');
 const { uniqueSlug, rupeesToPaise } = require('../utils/shopHelpers');
 const { saveBase64Image } = require('../utils/fileUpload');
+const { maybeSweep } = require('../services/orderLifecycle');
 
 const attachImages = async (products) => {
     if (products.length === 0) return products;
@@ -162,7 +163,7 @@ const listProducts = async (req, res) => {
         const total = totalResult[0].total;
 
         const products = await query(
-            `SELECT p.*, s.name as shop_name, s.slug as shop_slug
+            `SELECT p.*, (p.stock_quantity > 0) AS in_stock, s.name as shop_name, s.slug as shop_slug
              FROM shop_products p
              JOIN shops s ON s.id = p.shop_id
              ${whereClause}
@@ -210,22 +211,58 @@ const listMyProducts = async (req, res) => {
 const getProductById = async (req, res) => {
     try {
         const product = await queryOne(
-            `SELECT p.*, s.name as shop_name, s.slug as shop_slug, s.id as shop_id
+            `SELECT p.*, (p.stock_quantity > 0) AS in_stock, s.name as shop_name, s.slug as shop_slug, s.id as shop_id,
+                    s.status AS shop_status, s.owner_user_id,
+                    (s.upi_id IS NOT NULL AND s.upi_id <> '') AS accepts_upi
              FROM shop_products p JOIN shops s ON s.id = p.shop_id WHERE p.id = ?`,
             [req.params.id]
         );
 
-        if (!product) {
+        // Drafts, archived products and products of unapproved shops are visible only to their
+        // owner and to admins.
+        const isOwner = product && product.owner_user_id === req.user.id;
+        const isPublic = product && product.status === 'active' && product.shop_status === 'approved';
+        if (!product || (!isPublic && !isOwner && req.user.role !== 'admin')) {
             return res.status(404).json({ success: false, message: 'Product not found' });
         }
 
-        await query('UPDATE shop_products SET views_count = views_count + 1 WHERE id = ?', [req.params.id]);
+        if (isPublic && !isOwner) {
+            await query('UPDATE shop_products SET views_count = views_count + 1 WHERE id = ?', [req.params.id]);
+        }
 
-        const [withImages] = await attachImages([product]);
+        const { owner_user_id: _owner, ...publicFields } = product;
+        const [withImages] = await attachImages([publicFields]);
         res.json({ success: true, message: 'Product retrieved successfully', data: { product: withImages } });
     } catch (error) {
         console.error('getProductById error:', error);
         res.status(500).json({ success: false, message: 'Failed to retrieve product' });
+    }
+};
+
+// POST /shop/products/lookup - current price, stock and availability for the products in a cart,
+// so the cart can show up-to-date totals instead of prices saved when items were added.
+const lookupProducts = async (req, res) => {
+    try {
+        await maybeSweep();
+        const ids = [...new Set(req.body.ids.map(Number))];
+        const rows = await query(
+            `SELECT p.id, p.title, p.price_paise, p.stock_quantity, p.status, p.shop_id,
+                    s.name AS shop_name, s.status AS shop_status,
+                    (s.upi_id IS NOT NULL AND s.upi_id <> '') AS accepts_upi,
+                    (SELECT image_url FROM shop_product_images i WHERE i.product_id = p.id ORDER BY i.is_primary DESC, i.sort_order ASC LIMIT 1) AS image_url
+             FROM shop_products p JOIN shops s ON s.id = p.shop_id
+             WHERE p.id IN (${ids.map(() => '?').join(',')})`,
+            ids
+        );
+        const products = rows.map((row) => ({
+            ...row,
+            accepts_upi: Boolean(row.accepts_upi) && row.shop_status === 'approved',
+            available: row.status === 'active' && row.shop_status === 'approved' && row.stock_quantity > 0,
+        }));
+        res.json({ success: true, message: 'Products', data: { products } });
+    } catch (error) {
+        console.error('lookupProducts error:', error);
+        res.status(500).json({ success: false, message: 'Failed to look up products' });
     }
 };
 
@@ -236,4 +273,5 @@ module.exports = {
     listProducts,
     listMyProducts,
     getProductById,
+    lookupProducts,
 };

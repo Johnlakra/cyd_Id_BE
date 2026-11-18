@@ -41,4 +41,23 @@ const requireApprovedShop = async (req, res, next) => {
     }
 };
 
-module.exports = { attachOwnShop, requireApprovedShop };
+// Requires the caller to own a shop in one of `statuses`. Order management uses
+// ['approved', 'suspended'] so a suspended shop can still ship or refund orders it already took.
+const requireOwnShop = (statuses) => async (req, res, next) => {
+    try {
+        const shop = await queryOne('SELECT * FROM shops WHERE owner_user_id = ?', [req.user.id]);
+        if (!shop) {
+            return res.status(403).json({ success: false, message: 'You do not have a shop yet.' });
+        }
+        if (!statuses.includes(shop.status)) {
+            return res.status(403).json({ success: false, message: `Your shop is ${shop.status}.` });
+        }
+        req.shop = shop;
+        next();
+    } catch (error) {
+        console.error('requireOwnShop error:', error);
+        res.status(500).json({ success: false, message: 'Failed to verify shop access' });
+    }
+};
+
+module.exports = { attachOwnShop, requireApprovedShop, requireOwnShop };

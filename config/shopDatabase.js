@@ -25,10 +25,10 @@ const ensureColumn = async (tableName, columnName, definition) => {
         const existing = await queryOne(`
             SELECT COUNT(*) as count
             FROM information_schema.columns
-            WHERE table_schema = ?
+            WHERE table_schema = DATABASE()
             AND table_name = ?
             AND column_name = ?
-        `, [process.env.DB_NAME, tableName, columnName]);
+        `, [tableName, columnName]);
 
         if (existing.count === 0) {
             await query(`ALTER TABLE ${tableName} ADD COLUMN ${definition}`);
@@ -63,10 +63,10 @@ const createIndexSafely = async (indexName, tableName, columns) => {
         const existingIndex = await queryOne(`
             SELECT COUNT(*) as count
             FROM information_schema.statistics
-            WHERE table_schema = ?
+            WHERE table_schema = DATABASE()
             AND table_name = ?
             AND index_name = ?
-        `, [process.env.DB_NAME, tableName, indexName]);
+        `, [tableName, indexName]);
 
         if (existingIndex.count === 0) {
             await query(`CREATE INDEX ${indexName} ON ${tableName} (${columns})`);
@@ -211,25 +211,7 @@ const initShopTables = async () => {
         )
     `);
 
-    console.log('Creating shop_payments table...');
-    await query(`
-        CREATE TABLE IF NOT EXISTS shop_payments (
-            id INT PRIMARY KEY AUTO_INCREMENT,
-            order_id INT NOT NULL,
-            gateway VARCHAR(30) NOT NULL DEFAULT 'youpi',
-            gateway_order_ref VARCHAR(100) NOT NULL,
-            utr VARCHAR(50),
-            amount_paise BIGINT UNSIGNED NOT NULL,
-            status ENUM('initiated', 'success', 'failed') DEFAULT 'initiated',
-            delivery_id VARCHAR(100),
-            raw_webhook_payload JSON,
-            verified_at TIMESTAMP NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-            FOREIGN KEY (order_id) REFERENCES shop_orders(id),
-            UNIQUE KEY uniq_delivery_id (delivery_id)
-        )
-    `);
+    // Payment tables (claims, disputes, chat, evidence) are created by migrations/001_p2p_payments.js.
 
     console.log('Creating shop module indexes (with error handling)...');
     await createIndexSafely('idx_shops_owner', 'shops', 'owner_user_id');
@@ -240,8 +222,6 @@ const initShopTables = async () => {
     await createIndexSafely('idx_orders_customer', 'shop_orders', 'customer_user_id');
     await createIndexSafely('idx_orders_shop', 'shop_orders', 'shop_id');
     await createIndexSafely('idx_orders_status', 'shop_orders', 'status');
-    await createIndexSafely('idx_payments_order', 'shop_payments', 'order_id');
-    await createIndexSafely('idx_payments_gateway_ref', 'shop_payments', 'gateway_order_ref');
     await createIndexSafely('idx_addresses_user', 'shop_addresses', 'user_id');
 
     console.log('✅ Shop module tables initialized successfully');

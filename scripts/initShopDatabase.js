@@ -1,28 +1,23 @@
-// scripts/initShopDatabase.js - Initializes the Shop module tables
-// Run with: node scripts/initShopDatabase.js
+// scripts/initShopDatabase.js - Creates/updates the Shop module tables.
+// Run with: npm run init-shop-db   (same as `node scripts/migrate.js`)
 require('dotenv').config();
 const { testConnection } = require('../config/database');
-const { initShopTables, seedDefaultCategories } = require('../config/shopDatabase');
+const { runMigrations } = require('./migrate');
 
 const main = async () => {
+    console.log('🛍️  Initializing Shop module database...\n');
+    const connected = await testConnection();
+    if (!connected) {
+        console.error('❌ Database connection failed. Please check your configuration.');
+        process.exit(1);
+    }
     try {
-        console.log('🛍️  Initializing Shop module database...\n');
-
-        const connected = await testConnection();
-        if (!connected) {
-            console.error('❌ Database connection failed. Please check your configuration.');
-            process.exit(1);
-        }
-
-        await initShopTables();
-        await seedDefaultCategories();
-
-        console.log('\n🎉 Shop module database initialization completed successfully!');
+        await runMigrations();
+        console.log('\n🎉 Shop module database is ready!');
+        process.exit(0);
     } catch (error) {
         console.error('\n❌ Shop database initialization failed:', error.message);
         process.exit(1);
-    } finally {
-        process.exit(0);
     }
 };
 

@@ -46,12 +46,38 @@ const saveBase64Image = async (base64String) => {
             folder: 'test_photos',
             resource_type: 'auto'
         });
-        
+
         return result.secure_url; // Return the Cloudinary URL
     } catch (error) {
         throw new Error(`Cloudinary upload failed: ${error.message}`);
     }
 };
+
+// Upload an image and keep its identity. `type: 'authenticated'` stores it privately: it can only
+// be viewed through a short-lived signed URL from privateImageUrl(), never a public link. Used for
+// payment screenshots, which show the payer's bank details.
+const uploadImage = async (base64String, { folder, type = 'upload' } = {}) => {
+    const validation = validateBase64Image(base64String);
+    if (!validation.valid) {
+        const error = new Error(validation.error);
+        error.status = 400;
+        throw error;
+    }
+    try {
+        const result = await cloudinary.uploader.upload(base64String, { folder, type, resource_type: 'image' });
+        return { url: result.secure_url, public_id: result.public_id, format: result.format };
+    } catch (error) {
+        throw new Error(`Cloudinary upload failed: ${error.message}`);
+    }
+};
+
+// Signed link to a private image, valid for `ttlSeconds`.
+const privateImageUrl = (publicId, format, ttlSeconds = 600) =>
+    cloudinary.utils.private_download_url(publicId, format, {
+        type: 'authenticated',
+        resource_type: 'image',
+        expires_at: Math.floor(Date.now() / 1000) + ttlSeconds,
+    });
 
 // const saveBase64Image = async (base64String) => {
 //     try {
@@ -195,6 +221,8 @@ const validateBase64Image = (base64String) => {
 
 module.exports = {
     saveBase64Image,
+    uploadImage,
+    privateImageUrl,
     deleteFile,
     getFileInfo,
     validateBase64Image,

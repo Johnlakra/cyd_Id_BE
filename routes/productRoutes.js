@@ -5,13 +5,14 @@ const router = express.Router();
 const productController = require('../controllers/productController');
 const { authenticateToken } = require('../middleware/auth');
 const { requireApprovedShop } = require('../middleware/shopAuth');
-const { validateProduct, validateProductQuery } = require('../middleware/shopValidation');
+const { validateProduct, validateProductQuery, validateProductLookup, validateIdParam } = require('../middleware/shopValidation');
 
-// IMPORTANT: /mine must be registered before /:id so it isn't swallowed by the :id param route.
+// IMPORTANT: /mine and /lookup must be registered before /:id so they aren't swallowed by it.
 router.get('/mine', [authenticateToken, requireApprovedShop], productController.listMyProducts);
+router.post('/lookup', [authenticateToken, validateProductLookup], productController.lookupProducts);
 
 router.get('/', [authenticateToken, validateProductQuery], productController.listProducts);
-router.get('/:id', authenticateToken, productController.getProductById);
+router.get('/:id', [authenticateToken, validateIdParam], productController.getProductById);
 
 router.post('/', [authenticateToken, requireApprovedShop, validateProduct], productController.createProduct);
 router.put('/:id', [authenticateToken, requireApprovedShop, validateProduct], productController.updateProduct);

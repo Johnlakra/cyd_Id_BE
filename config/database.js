@@ -5,6 +5,7 @@ require('dotenv').config();
 // Database configuration
 const dbConfig = {
     host: process.env.DB_HOST || 'localhost',
+    port: Number(process.env.DB_PORT) || 3306,
     user: process.env.DB_USER || 'root',
     password: process.env.DB_PASSWORD || '',
     database: process.env.DB_NAME || 'cyd_new',
@@ -35,7 +36,11 @@ const query = async (sql, params = []) => {
         const [results] = await pool.execute(sql, params);
         return results;
     } catch (error) {
-        console.error('Database query error:', error);
+        // Duplicate-key errors are expected and handled by callers (e.g. one shop per user, a UTR
+        // used twice), so they are not logged as failures.
+        if (error.code !== 'ER_DUP_ENTRY') {
+            console.error('Database query error:', error);
+        }
         throw error;
     }
 };
