@@ -2,9 +2,11 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
+const helmet = require('helmet');
 const path = require('path');
 
 const { ensureUploadDir } = require('./utils/fileUpload');
+const { corsOptions, jsonErrorHandler } = require('./middleware/security');
 
 // Import routes
 const authRoutes = require('./routes/auth');
@@ -15,8 +17,14 @@ const profileHolderRoutes = require('./routes/profileHolder');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Behind Render/Vercel's proxy: use the client IP from X-Forwarded-For (one hop) so rate limits
+// apply per client rather than to the proxy as a whole.
+app.set('trust proxy', 1);
+
 // Middleware
-app.use(cors());
+// crossOriginResourcePolicy is relaxed so the frontend (another origin) can still load /uploads.
+app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
+app.use(cors(corsOptions()));
 app.use(express.json({ limit: '10mb' })); // Increased limit for base64 images
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
@@ -63,6 +71,10 @@ app.use('/profile-holder', profileHolderRoutes);
 //     console.log('SIGINT received. Shutting down gracefully...');
 //     process.exit(0);
 // });
+
+// Must be registered after all routes: turns body-parser errors and anything unhandled into a
+// JSON response instead of Express's HTML stack-trace page.
+app.use(jsonErrorHandler);
 
 // Start server
 app.listen(PORT, () => {

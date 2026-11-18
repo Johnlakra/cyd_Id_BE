@@ -40,10 +40,7 @@ const register = async (req, res) => {
             [username, email, hashedPassword, role]
         );
 
-        // Generate token
-        const token = generateToken(result.insertId);
-
-        // Get user data (without password)
+        // No token is returned: the caller is the admin who created the account, not the new user.
         const user = await queryOne(
             'SELECT id, username, email, role, created_at FROM users WHERE id = ?',
             [result.insertId]
@@ -53,7 +50,6 @@ const register = async (req, res) => {
             success: true,
             message: 'User registered successfully',
             data: {
-                token,
                 user
             }
         });
