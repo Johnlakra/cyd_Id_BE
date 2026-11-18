@@ -41,7 +41,6 @@ const getFileExtensionFromBase64 = (base64String) => {
 
 // Save base64 image to file
 const saveBase64Image = async (base64String) => {
-    console.log(base64String, "base64String")
     try {
         const result = await cloudinary.uploader.upload(base64String, {
             folder: 'test_photos',
