@@ -70,7 +70,7 @@ This CYD ID Card Management System provides a comprehensive multi-role authentic
 #### **General Authentication**
 ```http
 POST /auth/login
-POST /auth/register  
+POST /auth/register      # admin only - creates a user with any role
 POST /auth/logout
 GET /auth/profile
 PUT /auth/profile

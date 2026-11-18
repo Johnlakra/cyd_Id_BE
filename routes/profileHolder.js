@@ -5,6 +5,7 @@ const { body } = require('express-validator');
 const profileHolderController = require('../controllers/profileHolderController');
 const { authenticateToken } = require('../middleware/auth');
 const { handleValidationErrors } = require('../middleware/validation');
+const { loginLimiter } = require('../middleware/security');
 
 // Profile holder authentication middleware
 const requireProfileHolder = (req, res, next) => {
@@ -19,8 +20,9 @@ const requireProfileHolder = (req, res, next) => {
 
 // @route   POST /api/profile-holder/login
 // @desc    Login for profile holders
-// @access  Public
+// @access  Public (rate limited)
 router.post('/login', [
+    loginLimiter,
     body('username').notEmpty().withMessage('Username is required'),
     body('password').notEmpty().withMessage('Password is required'),
     handleValidationErrors

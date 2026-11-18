@@ -4,22 +4,24 @@ const { body } = require('express-validator');
 const router = express.Router();
 
 const authController = require('../controllers/authController');
-const { authenticateToken } = require('../middleware/auth');
-const { 
-    validateRegistration, 
+const { authenticateToken, requireAdmin } = require('../middleware/auth');
+const { loginLimiter } = require('../middleware/security');
+const {
+    validateRegistration,
     validateLogin,
     handleValidationErrors
 } = require('../middleware/validation');
 
 // @route   POST /api/auth/register
-// @desc    Register new user
-// @access  Public
-router.post('/register', validateRegistration, authController.register);
+// @desc    Create a user account (any role). Admin-only: this used to be public and let anyone
+//          create an admin account. Admins use it from the User Management screen.
+// @access  Private (Admin only)
+router.post('/register', [authenticateToken, requireAdmin, validateRegistration], authController.register);
 
 // @route   POST /api/auth/login
 // @desc    Login user
-// @access  Public
-router.post('/login', validateLogin, authController.login);
+// @access  Public (rate limited)
+router.post('/login', loginLimiter, validateLogin, authController.login);
 
 // @route   POST /api/auth/logout
 // @desc    Logout user (client-side token invalidation)
