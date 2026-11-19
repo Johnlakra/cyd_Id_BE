@@ -25,7 +25,11 @@ Audit date: 2026-11-17.
 | BE-24 | Partly | A reason is required to reject or suspend a shop, and there's an `audit_log`; no notifications yet |
 | C-01, C-02, C-03, C-06, C-08, C-09 | ✅ Fixed (backend) | `GET /shop/config`, `accepts_upi`, product visibility, address snapshot, refunds, expiry |
 | Engineering: tests + CI | ✅ Backend | 62 jest/supertest tests, passing on MariaDB 10.11 and MySQL 8.0; GitHub Actions workflow |
-| FE-* | See the frontend PR | [Johnlakra/CYD_ID#2](https://github.com/Johnlakra/CYD_ID/pull/2) |
+| FE-01, FE-02, FE-04, FE-05, FE-06, FE-10, FE-11, FE-14, FE-15, FE-17, FE-25 | ✅ Fixed | Frontend PR [Johnlakra/CYD_ID#2](https://github.com/Johnlakra/CYD_ID/pull/2): one idempotent checkout, per-user revalidated cart, pay-the-seller screens, no script injection, 12 frontend tests |
+| FE-08, FE-23, FE-24, FE-31 | ✅ Fixed | Scrollable shop/admin tabs on phones; non-active products and address deletes fixed via the backend; old payment polling removed |
+| FE-03, FE-16, FE-20, FE-21 | Partly | `errors[]` shown on shop screens; new screens have labels and keyboard-usable cards; payment screenshots resized (product photos aren't yet); reasons required for reject/suspend |
+| FE-07 (PWA), FE-09, FE-12, FE-13, FE-18, FE-19, FE-22, FE-26 … FE-30, C-04, C-07, C-10 | Open | Not changed in this round |
+| End-to-end check | ✅ | Real frontend against the real backend + MariaDB in a browser: pay screen (UPI ID, amount, QR, countdown) → UTR → seller confirm → chat → admin dispute resolution; 375px layout with no overflow |
 | Everything else | Open | As listed below |
 
 ## 0. TL;DR
