@@ -2,21 +2,35 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
+const helmet = require('helmet');
 const path = require('path');
 
 const { ensureUploadDir } = require('./utils/fileUpload');
+const { corsOptions, jsonErrorHandler } = require('./middleware/security');
 
 // Import routes
 const authRoutes = require('./routes/auth');
 const profileRoutes = require('./routes/profile');
 const profileHolderRoutes = require('./routes/profileHolder');
+const shopRoutes = require('./routes/shopRoutes');
+const productRoutes = require('./routes/productRoutes');
+const addressRoutes = require('./routes/addressRoutes');
+const orderRoutes = require('./routes/orderRoutes');
+const checkoutRoutes = require('./routes/checkoutRoutes');
+const { sweep } = require('./services/orderLifecycle');
 
 // Initialize Express app
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Behind Render/Vercel's proxy: use the client IP from X-Forwarded-For (one hop) so rate limits
+// apply per client rather than to the proxy as a whole.
+app.set('trust proxy', 1);
+
 // Middleware
-app.use(cors());
+// crossOriginResourcePolicy is relaxed so the frontend (another origin) can still load /uploads.
+app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
+app.use(cors(corsOptions()));
 app.use(express.json({ limit: '10mb' })); // Increased limit for base64 images
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
@@ -44,6 +58,11 @@ app.get('/health', (req, res) => {
 app.use('/auth', authRoutes);
 app.use('/profiles', profileRoutes);
 app.use('/profile-holder', profileHolderRoutes);
+app.use('/shop', shopRoutes);
+app.use('/shop', checkoutRoutes);
+app.use('/shop/products', productRoutes);
+app.use('/shop/addresses', addressRoutes);
+app.use('/shop/orders', orderRoutes);
 
 // Handle 404 routes
 // app.use('*', (req, res) => {
@@ -64,11 +83,25 @@ app.use('/profile-holder', profileHolderRoutes);
 //     process.exit(0);
 // });
 
-// Start server
-app.listen(PORT, () => {
-            console.log(`✅ Server is running on port ${PORT}`);
-            console.log('\n🎉 Server started successfully!\n');
-        })
+// Must be registered after all routes: turns body-parser errors and anything unhandled into a
+// JSON response instead of Express's HTML stack-trace page.
+app.use(jsonErrorHandler);
+
+// Start the server only when run directly (`node server.js`). Tests and serverless hosts import
+// `app` instead.
+if (require.main === module) {
+    app.listen(PORT, () => {
+        console.log(`✅ Server is running on port ${PORT}`);
+        console.log('\n🎉 Server started successfully!\n');
+    });
+
+    // Cancel unpaid orders past their payment window and auto-resolve stale disputes.
+    setInterval(() => {
+        sweep().catch((error) => console.error('Order sweep failed:', error.message));
+    }, 60 * 1000).unref();
+}
+
+module.exports = app;
 // const startServer = async () => {
 //     try {
 //         console.log('🚀 Starting Profile Management API...');
